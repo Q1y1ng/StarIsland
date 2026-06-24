@@ -1,0 +1,61 @@
+# =============================================================================
+# StarIsland — .gitignore
+# =============================================================================
+
+# ── Xcode ─────────────────────────────────────────────────────────────────
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad
+
+# ── Build Artifacts ───────────────────────────────────────────────────────
+build/
+*.ipa
+*.xcarchive
+*.app
+build.log
+build-release.log
+
+# ── macOS ─────────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# ── XcodeGen (generated) ──────────────────────────────────────────────────
+# .xcodeproj is regenerated from project.yml — never commit it.
+# -*-mode: keep; reason: prevents merge conflicts in pbxproj -*-
+
+# ── Swift Package Manager ─────────────────────────────────────────────────
+.packages/
+Package.resolved
+.swiftpm/
+*.build/
+
+# ── Playgrounds ───────────────────────────────────────────────────────────
+*.playground
+*.playgroundbook
+
+# ── IDE / Editor ──────────────────────────────────────────────────────────
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.sublime-*
+
+# ── Environment ───────────────────────────────────────────────────────────
+.env
+.env.*
+*.p12
+*.mobileprovision
+*.provisionprofile
+
+# ── Logs ──────────────────────────────────────────────────────────────────
+*.log
+*.trace
+*.oslog

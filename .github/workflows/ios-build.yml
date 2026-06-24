@@ -1,0 +1,218 @@
+# =============================================================================
+# StarIsland — iOS Build & CI Pipeline
+# =============================================================================
+# Triggers:
+#   push / pull_request   → Build Verification (no signing)
+#   workflow_dispatch     → Full Archive + IPA (requires signing secrets)
+#
+# Branch strategy:
+#   develop     → daily dev (push/PR builds)
+#   release/*   → RC builds (push/PR builds, dispatch → IPA)
+#   main        → stable releases (push builds, dispatch → IPA)
+# =============================================================================
+name: iOS Build
+
+on:
+  push:
+    branches: [main, develop, release/**]
+  pull_request:
+    branches: [main, develop, release/**]
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PROJECT_NAME: StarIsland
+  SCHEME: StarIsland
+  XCODE_VERSION: latest-stable
+
+jobs:
+  # ── Job 1: Build Verification ────────────────────────────────────────────
+  # Every push & PR: compiles the project, runs diagnostics, uploads logs.
+  build:
+    name: Build Verification
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode (latest stable)
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode Project
+        run: xcodegen generate
+
+      - name: Run Build Diagnostic
+        run: |
+          chmod +x Scripts/ci-diagnose.sh
+          ./Scripts/ci-diagnose.sh
+        continue-on-error: true
+
+      - name: Upload Diagnostic Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostic-log
+          path: diagnostic.log
+          retention-days: 30
+
+      - name: Build (No Signing)
+        run: |
+          xcodebuild clean build \
+            -project "$PROJECT_NAME.xcodeproj" \
+            -scheme "$SCHEME" \
+            -destination "generic/platform=iOS" \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            2>&1 | tee build.log
+
+      - name: Upload Build Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          retention-days: 30
+
+  # ── Job 2: Archive & IPA ─────────────────────────────────────────────────
+  # Only on workflow_dispatch: creates a signed .ipa for AltStore sideloading.
+  # Requires GitHub Secrets:
+  #   IOS_CERT_BASE64      — base64-encoded development .p12 certificate
+  #   IOS_CERT_PASSWORD    — password for the .p12
+  #   IOS_PROFILE_BASE64   — base64-encoded .mobileprovision
+  #   TEAM_ID              — Apple Developer Team ID
+  release:
+    name: Archive + IPA
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode (latest stable)
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode Project
+        run: xcodegen generate
+
+      # ── Code Signing (manual) ──────────────────────────────────────
+      # Import .p12 certificate + .mobileprovision from secrets.
+      # These are generated on a Mac:
+      #   $ security export -k login.keychain -P "pwd" -t identities -f pkcs12 cert.p12
+      #   $ base64 -i cert.p12    → copy to IOS_CERT_BASE64
+      #   $ base64 -i profile.mobileprovision → copy to IOS_PROFILE_BASE64
+      - name: Import Signing Certificate
+        if: env.IOS_CERT_BASE64 != ''
+        env:
+          IOS_CERT_BASE64: ${{ secrets.IOS_CERT_BASE64 }}
+          IOS_CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
+        run: |
+          echo "$IOS_CERT_BASE64" | base64 -d > /tmp/cert.p12
+          security create-keychain -p temp ios-build.keychain
+          security default-keychain -s ios-build.keychain
+          security unlock-keychain -p temp ios-build.keychain
+          security import /tmp/cert.p12 \
+            -k ios-build.keychain \
+            -P "$IOS_CERT_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k temp ios-build.keychain
+          security list-keychain -d user -s ios-build.keychain
+          rm -f /tmp/cert.p12
+
+      - name: Install Provisioning Profile
+        if: env.IOS_PROFILE_BASE64 != ''
+        env:
+          IOS_PROFILE_BASE64: ${{ secrets.IOS_PROFILE_BASE64 }}
+        run: |
+          echo "$IOS_PROFILE_BASE64" | base64 -d > /tmp/profile.mobileprovision
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy \
+            -c "Print :UUID" /dev/stdin \
+            <<< "$(security cms -D -i /tmp/profile.mobileprovision 2>/dev/null)")
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          cp /tmp/profile.mobileprovision \
+            "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
+          echo "Installed profile: $PROFILE_UUID"
+          rm -f /tmp/profile.mobileprovision
+
+      - name: Archive
+        if: env.TEAM_ID != ''
+        env:
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+        run: |
+          xcodebuild archive \
+            -project "$PROJECT_NAME.xcodeproj" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -archivePath "$PROJECT_NAME.xcarchive" \
+            -destination "generic/platform=iOS" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            -allowProvisioningUpdates \
+            2>&1 | tee build-release.log
+
+      - name: Export IPA
+        if: env.TEAM_ID != ''
+        env:
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+        run: |
+          # Substitute TEAM_ID into ExportOptions.plist
+          sed "s/YOUR_TEAM_ID/$TEAM_ID/g" ExportOptions.plist > /tmp/ExportOptions.plist
+          mkdir -p build
+          xcodebuild -exportArchive \
+            -archivePath "$PROJECT_NAME.xcarchive" \
+            -exportPath build/ \
+            -exportOptionsPlist /tmp/ExportOptions.plist \
+            -allowProvisioningUpdates \
+            2>&1 | tee -a build-release.log
+
+      - name: Upload Build Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-release-log
+          path: build-release.log
+          retention-days: 30
+
+      - name: Upload IPA
+        if: env.TEAM_ID != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarIsland-IPA
+          path: build/*.ipa
+          retention-days: 30
+
+      # ── Signing Not Configured Warning ──────────────────────────────
+      - name: Signing Not Configured
+        if: env.TEAM_ID == ''
+        env:
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+        run: |
+          echo "::warning::TEAM_ID secret not set."
+          echo "::warning::IPA generation requires:"
+          echo "::warning::  1. TEAM_ID"
+          echo "::warning::  2. IOS_CERT_BASE64 + IOS_CERT_PASSWORD"
+          echo "::warning::  3. IOS_PROFILE_BASE64"
+          echo "::warning::Build verification completed successfully."
+          echo "::warning::Configure secrets and re-run for IPA."

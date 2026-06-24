@@ -1,0 +1,89 @@
+# =============================================================================
+# StarIsland — XcodeGen Project Specification
+# =============================================================================
+# Usage:
+#   brew install xcodegen
+#   xcodegen generate
+#
+# Generate on first checkout (or after adding new files) to produce
+# StarIsland.xcodeproj.  The .xcodeproj is gitignored.
+# =============================================================================
+# ✦ Bundle ID:  com.starisland.app
+# ✦ Target:     iOS 17.0 (iPhone only)
+# ✦ Frameworks: SwiftUI, SwiftData, MapKit, CoreLocation, BackgroundTasks,
+#               Compression, UniformTypeIdentifiers, PhotosUI
+# ✦ Local:      zh_CN (primary)
+# =============================================================================
+
+name: StarIsland
+
+options:
+  bundleIdPrefix: com.starisland
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "16.2"
+  generateEmptyDirectories: false
+  usesTabs: false
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    TARGETED_DEVICE_FAMILY: "1"
+    INFOPLIST_FILE: StarIsland/Info.plist
+    PRODUCT_BUNDLE_IDENTIFIER: com.starisland.app
+    DEVELOPMENT_TEAM: "$(DEVELOPMENT_TEAM)"
+    CODE_SIGN_STYLE: Automatic
+    SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+    SUPPORTS_MACCATALYST: NO
+
+targets:
+  StarIsland:
+    type: application
+    platform: iOS
+    sources:
+      - path: StarIsland
+        type: group
+        createIntermediateGroups: true
+    settings:
+      base:
+        INFOPLIST_FILE: StarIsland/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.starisland.app
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited)"
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        # ── Code Signing ──────────────────────────────────────
+        # Override via GitHub Secrets in CI, or leave Automatic
+        # for local development.
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: "$(DEVELOPMENT_TEAM)"
+    dependencies: []
+    info:
+      path: StarIsland/Info.plist
+      properties:
+        CFBundleDevelopmentRegion: zh_CN
+        CFBundleDisplayName: StarIsland
+        CFBundleExecutable: $(EXECUTABLE_NAME)
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundleInfoDictionaryVersion: "6.0"
+        CFBundleName: StarIsland
+        CFBundlePackageType: APPL
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "9"
+        LSRequiresIPhoneOS: true
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UILaunchStoryboardName: LaunchScreen
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+        UIRequiredDeviceCapabilities:
+          - arm64
+        UIBackgroundModes:
+          - processing
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.starisland.autobackup
+        UIApplicationSupportsIndirectInputEvents: true
