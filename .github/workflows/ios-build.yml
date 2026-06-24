@@ -126,13 +126,35 @@ jobs:
       - name: Locate App Bundle
         id: locate-app
         run: |
+          # Method 1: Read BUILT_PRODUCTS_DIR from xcodebuild settings (primary)
           BUILT_PRODUCTS_DIR=$(xcodebuild \
             -project "$PROJECT_NAME.xcodeproj" \
             -scheme "$SCHEME" \
+            -destination "generic/platform=iOS" \
             -configuration Release \
-            -showBuildSettings 2>/dev/null \
-            | grep " BUILT_PRODUCTS_DIR " \
+            -showBuildSettings 2>&1 \
+            | grep -E '^[[:space:]]+BUILT_PRODUCTS_DIR[[:space:]]+=' \
             | awk '{print $NF}')
+
+          # Ensure it's a valid path
+          if [ -z "$BUILT_PRODUCTS_DIR" ] || [ ! -d "$BUILT_PRODUCTS_DIR" ]; then
+            # Method 2: Fallback — search DerivedData directly
+            echo "⚠️  showBuildSettings lookup failed, searching DerivedData..."
+            FOUND_APP=$(find ~/Library/Developer/Xcode/DerivedData \
+              -path "*/Release-iphoneos/StarIsland.app" -type d \
+              2>/dev/null | head -1)
+            if [ -n "$FOUND_APP" ]; then
+              BUILT_PRODUCTS_DIR="${FOUND_APP%/*}"
+            fi
+          fi
+
+          # Validate
+          if [ -z "$BUILT_PRODUCTS_DIR" ] || [ ! -d "$BUILT_PRODUCTS_DIR/StarIsland.app" ]; then
+            echo "❌ ERROR: Cannot locate StarIsland.app after build"
+            ls -la ~/Library/Developer/Xcode/DerivedData/ 2>/dev/null | head -20
+            exit 1
+          fi
+
           echo "BUILT_PRODUCTS_DIR=$BUILT_PRODUCTS_DIR" >> "$GITHUB_OUTPUT"
           echo "Found: $BUILT_PRODUCTS_DIR/StarIsland.app"
 
