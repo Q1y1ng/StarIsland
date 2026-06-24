@@ -158,18 +158,97 @@ jobs:
           echo "BUILT_PRODUCTS_DIR=$BUILT_PRODUCTS_DIR" >> "$GITHUB_OUTPUT"
           echo "Found: $BUILT_PRODUCTS_DIR/StarIsland.app"
 
+          # Diagnostics: list app bundle contents and size
+          echo ""
+          echo "===== App Bundle Content ====="
+          find "$BUILT_PRODUCTS_DIR/StarIsland.app" | head -50
+          du -sh "$BUILT_PRODUCTS_DIR/StarIsland.app"
+
       - name: Package Unsigned IPA
         run: |
           mkdir -p build/Payload
-          cp -r "${{ steps.locate-app.outputs.BUILT_PRODUCTS_DIR }}/StarIsland.app" build/Payload/
+
+          APP_PATH="${{ steps.locate-app.outputs.BUILT_PRODUCTS_DIR }}/StarIsland.app"
+
+          echo "APP_PATH=$APP_PATH"
+
+          if [ ! -d "$APP_PATH" ]; then
+            echo "❌ StarIsland.app not found"
+            exit 1
+          fi
+
+          echo "===== Original app size ====="
+          du -sh "$APP_PATH"
+
+          # Apple-recommended way to copy a .app bundle
+          ditto "$APP_PATH" "build/Payload/StarIsland.app"
+
+          echo "===== Payload content ====="
+          find build/Payload | head -50
+
+          echo "===== Copied app size ====="
+          du -sh build/Payload/StarIsland.app
+
           cd build
-          zip -qr "StarIsland.ipa" Payload/
-          echo "IPA size: $(ls -lh StarIsland.ipa | awk '{print $5}')"
+          zip -qry StarIsland.ipa Payload
+
+          echo "===== IPA size ====="
+          ls -lh StarIsland.ipa
 
       - name: Verify IPA Structure
         run: |
-          unzip -l "build/StarIsland.ipa" | head -20
+          echo "===== IPA content ====="
+          unzip -l build/StarIsland.ipa | head -100
+
+          echo ""
+          echo "===== IPA size ====="
+          ls -lh build/StarIsland.ipa
+
+          echo ""
+          echo "===== Payload tree ====="
+          PAYLOAD_COUNT=$(unzip -l build/StarIsland.ipa | grep -c "Payload/StarIsland.app" || true)
+          unzip -l build/StarIsland.ipa | grep Payload | head -50
+
+          echo ""
+          if [ "$PAYLOAD_COUNT" -eq 0 ]; then
+            echo "❌ Payload is empty — no StarIsland.app in IPA"
+            exit 1
+          fi
+
           echo "✅ Unsigned IPA ready for sideloading"
+
+      - name: Generate IPA Structure Report
+        run: |
+          {
+            echo "===== APP_PATH ====="
+            echo "${{ steps.locate-app.outputs.BUILT_PRODUCTS_DIR }}/StarIsland.app"
+
+            echo ""
+            echo "===== Original app size ====="
+            du -sh "${{ steps.locate-app.outputs.BUILT_PRODUCTS_DIR }}/StarIsland.app" 2>/dev/null || echo "N/A"
+
+            echo ""
+            echo "===== Payload content ====="
+            find build/Payload 2>/dev/null | head -50
+
+            echo ""
+            echo "===== IPA size ====="
+            ls -lh build/StarIsland.ipa 2>/dev/null || echo "N/A"
+
+            echo ""
+            echo "===== Payload file list ====="
+            unzip -l build/StarIsland.ipa 2>/dev/null | grep Payload | head -50
+          } > build/ipa-structure.txt
+
+          echo "ipa-structure.txt written ($(wc -c < build/ipa-structure.txt) bytes)"
+
+      - name: Upload IPA Structure Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipa-structure
+          path: build/ipa-structure.txt
+          retention-days: 30
 
       - name: Upload Build Log
         if: always()
