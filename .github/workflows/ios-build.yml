@@ -123,52 +123,115 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             2>&1 | tee build-release.log
 
+          echo ""
+          echo "============================================"
+          echo "===== Build Products (all files) ====="
+          echo "============================================"
+          find ~/Library/Developer/Xcode/DerivedData \
+            -type f \
+            | grep -E "StarIsland$|Info\.plist|\.app" \
+            | head -200
+
+          echo ""
+          echo "============================================"
+          echo "===== Release-iphoneos tree ====="
+          echo "============================================"
+          find ~/Library/Developer/Xcode/DerivedData \
+            -path "*Release-iphoneos*" \
+            | head -200
+
+          echo ""
+          echo "============================================"
+          echo "===== Products Directory ====="
+          echo "============================================"
+          find ~/Library/Developer/Xcode/DerivedData \
+            -path "*Build/Products*" \
+            | head -300
+
+          echo ""
+          echo "============================================"
+          echo "===== App Bundle Content ====="
+          echo "============================================"
+          find ~/Library/Developer/Xcode/DerivedData \
+            -path "*StarIsland.app*" \
+            | head -200
+
+      - name: Export Build Settings
+        run: |
+          xcodebuild \
+            -project "$PROJECT_NAME.xcodeproj" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -showBuildSettings \
+            > build-settings.txt 2>&1
+          echo "build-settings.txt: $(wc -c < build-settings.txt) bytes"
+
+      - name: Extract Release Paths
+        run: |
+          grep -E \
+            "TARGET_BUILD_DIR|BUILT_PRODUCTS_DIR|FULL_PRODUCT_NAME|EXECUTABLE_NAME|EXECUTABLE_PATH|WRAPPER_NAME|PRODUCT_NAME|INFOPLIST_FILE|PRODUCT_BUNDLE_IDENTIFIER|PROJECT_DIR|SRCROOT|CONFIGURATION_BUILD_DIR" \
+            build-settings.txt \
+            > release-paths.txt
+          cat release-paths.txt
+          echo ""
+          echo "release-paths.txt: $(wc -c < release-paths.txt) bytes"
+
       - name: Locate App Bundle
         id: locate-app
         run: |
-          # Method 1: Read BUILT_PRODUCTS_DIR from xcodebuild settings (primary)
-          BUILT_PRODUCTS_DIR=$(xcodebuild \
-            -project "$PROJECT_NAME.xcodeproj" \
-            -scheme "$SCHEME" \
-            -destination "generic/platform=iOS" \
-            -configuration Release \
-            -showBuildSettings 2>&1 \
-            | grep -E '^[[:space:]]+BUILT_PRODUCTS_DIR[[:space:]]+=' \
-            | awk '{print $NF}')
+          # Read key build paths from exported settings
+          TARGET_BUILD_DIR=$(grep -E "^[[:space:]]+TARGET_BUILD_DIR[[:space:]]+" build-settings.txt | awk '{print $NF}')
+          FULL_PRODUCT_NAME=$(grep -E "^[[:space:]]+FULL_PRODUCT_NAME[[:space:]]+" build-settings.txt | awk '{print $NF}')
+          BUILT_PRODUCTS_DIR=$(grep -E "^[[:space:]]+BUILT_PRODUCTS_DIR[[:space:]]+" build-settings.txt | awk '{print $NF}')
 
-          # Ensure it's a valid path
-          if [ -z "$BUILT_PRODUCTS_DIR" ] || [ ! -d "$BUILT_PRODUCTS_DIR" ]; then
-            # Method 2: Fallback — search DerivedData directly
-            echo "⚠️  showBuildSettings lookup failed, searching DerivedData..."
+          echo "TARGET_BUILD_DIR=$TARGET_BUILD_DIR"
+          echo "FULL_PRODUCT_NAME=$FULL_PRODUCT_NAME"
+          echo "BUILT_PRODUCTS_DIR=$BUILT_PRODUCTS_DIR"
+
+          # Primary: TARGET_BUILD_DIR + FULL_PRODUCT_NAME (most precise)
+          APP_PATH="$TARGET_BUILD_DIR/$FULL_PRODUCT_NAME"
+          echo "APP_PATH=$APP_PATH"
+
+          # Fallback: BUILT_PRODUCTS_DIR + StarIsland.app
+          if [ -z "$TARGET_BUILD_DIR" ] || [ -z "$FULL_PRODUCT_NAME" ] || [ ! -d "$APP_PATH" ]; then
+            echo "⚠️  TARGET_BUILD_DIR+FULL_PRODUCT_NAME lookup failed, trying BUILT_PRODUCTS_DIR..."
+            APP_PATH="$BUILT_PRODUCTS_DIR/StarIsland.app"
+            echo "APP_PATH (fallback 1)=$APP_PATH"
+          fi
+
+          # Fallback 2: search DerivedData
+          if [ ! -d "$APP_PATH" ]; then
+            echo "⚠️  BUILT_PRODUCTS_DIR lookup failed, searching DerivedData..."
             FOUND_APP=$(find ~/Library/Developer/Xcode/DerivedData \
               -path "*/Release-iphoneos/StarIsland.app" -type d \
               2>/dev/null | head -1)
             if [ -n "$FOUND_APP" ]; then
-              BUILT_PRODUCTS_DIR="${FOUND_APP%/*}"
+              APP_PATH="$FOUND_APP"
+              echo "APP_PATH (fallback 2)=$APP_PATH"
             fi
           fi
 
           # Validate
-          if [ -z "$BUILT_PRODUCTS_DIR" ] || [ ! -d "$BUILT_PRODUCTS_DIR/StarIsland.app" ]; then
+          if [ ! -d "$APP_PATH" ]; then
             echo "❌ ERROR: Cannot locate StarIsland.app after build"
-            ls -la ~/Library/Developer/Xcode/DerivedData/ 2>/dev/null | head -20
+            echo "Searching entire DerivedData for any .app..."
+            find ~/Library/Developer/Xcode/DerivedData -name "*.app" -type d 2>/dev/null | head -30
             exit 1
           fi
 
           echo "BUILT_PRODUCTS_DIR=$BUILT_PRODUCTS_DIR" >> "$GITHUB_OUTPUT"
-          echo "Found: $BUILT_PRODUCTS_DIR/StarIsland.app"
+          echo "APP_PATH=$APP_PATH" >> "$GITHUB_OUTPUT"
 
-          # Diagnostics: list app bundle contents and size
           echo ""
-          echo "===== App Bundle Content ====="
-          find "$BUILT_PRODUCTS_DIR/StarIsland.app" | head -50
-          du -sh "$BUILT_PRODUCTS_DIR/StarIsland.app"
+          echo "===== Bundle Content ====="
+          find "$APP_PATH" | head -100
+          du -sh "$APP_PATH"
 
       - name: Package Unsigned IPA
         run: |
           mkdir -p build/Payload
 
-          APP_PATH="${{ steps.locate-app.outputs.BUILT_PRODUCTS_DIR }}/StarIsland.app"
+          APP_PATH="${{ steps.locate-app.outputs.APP_PATH }}"
 
           echo "APP_PATH=$APP_PATH"
 
@@ -215,17 +278,31 @@ jobs:
             exit 1
           fi
 
+          # Check for empty .app in payload
+          PAYLOAD_APP_SIZE=$(du -sk build/Payload/StarIsland.app 2>/dev/null | awk '{print $1}')
+          echo "Payload app size: ${PAYLOAD_APP_SIZE}KB"
+          if [ "$PAYLOAD_APP_SIZE" -eq 0 ] 2>/dev/null; then
+            echo "❌ Empty .app bundle detected"
+            exit 1
+          fi
+
+          # Check for Info.plist inside payload
+          if [ ! -f build/Payload/StarIsland.app/Info.plist ]; then
+            echo "❌ Missing Info.plist in Payload/StarIsland.app — bundle is invalid"
+            exit 1
+          fi
+
           echo "✅ Unsigned IPA ready for sideloading"
 
       - name: Generate IPA Structure Report
         run: |
           {
             echo "===== APP_PATH ====="
-            echo "${{ steps.locate-app.outputs.BUILT_PRODUCTS_DIR }}/StarIsland.app"
+            echo "${{ steps.locate-app.outputs.APP_PATH }}"
 
             echo ""
             echo "===== Original app size ====="
-            du -sh "${{ steps.locate-app.outputs.BUILT_PRODUCTS_DIR }}/StarIsland.app" 2>/dev/null || echo "N/A"
+            du -sh "${{ steps.locate-app.outputs.APP_PATH }}" 2>/dev/null || echo "N/A"
 
             echo ""
             echo "===== Payload content ====="
@@ -248,6 +325,22 @@ jobs:
         with:
           name: ipa-structure
           path: build/ipa-structure.txt
+          retention-days: 30
+
+      - name: Upload Build Settings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-settings
+          path: build-settings.txt
+          retention-days: 30
+
+      - name: Upload Release Paths
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-paths
+          path: release-paths.txt
           retention-days: 30
 
       - name: Upload Build Log
