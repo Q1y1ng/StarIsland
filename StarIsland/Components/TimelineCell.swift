@@ -99,7 +99,7 @@ struct TimelineCell: View {
                 Label(location, systemImage: "location.fill")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                    .labelStyle(.spaced)
+                    .labelStyle(.titleAndIcon)
             }
 
             if let mood = record.mood {

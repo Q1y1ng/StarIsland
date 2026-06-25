@@ -149,7 +149,7 @@ struct TimelineView: View {
             imagePaths: hero.paths,
             initialIndex: hero.index,
             namespace: heroNamespace,
-            heroFilename: hero.filename,
+            heroID: hero.filename,
             onDismiss: dismissHero
         )
         .transition(.opacity)
@@ -185,8 +185,9 @@ struct TimelineView: View {
             newRecordID = first.id
             previousCount = newCount
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak newRecordID] in
-                if self.newRecordID == newRecordID {
+            let id = newRecordID
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                if self.newRecordID == id {
                     self.newRecordID = nil
                 }
             }

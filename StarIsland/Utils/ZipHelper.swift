@@ -38,17 +38,17 @@ enum ZipHelper {
 
             // ── Local file header ───────────────────────────────────
             var lh = Data()
-            lh.append(UInt32(0x04034b50).littleEndian)   // signature
-            lh.append(UInt16(20).littleEndian)            // version needed (2.0)
-            lh.append(UInt16(0).littleEndian)              // flags
-            lh.append(UInt16(0).littleEndian)              // method: stored
-            lh.append(UInt16(0xAC34).littleEndian)        // mod time (~12:34)
-            lh.append(UInt16(0x4A21).littleEndian)        // mod date (~2026‑06‑24)
-            lh.append(crc.littleEndian)
-            lh.append(UInt32(entry.data.count).littleEndian)
-            lh.append(UInt32(entry.data.count).littleEndian)
-            lh.append(UInt16(nameData.count).littleEndian)
-            lh.append(UInt16(0).littleEndian)
+            lh.appendLE(UInt32(0x04034b50))   // signature
+            lh.appendLE(UInt16(20))            // version needed (2.0)
+            lh.appendLE(UInt16(0))              // flags
+            lh.appendLE(UInt16(0))              // method: stored
+            lh.appendLE(UInt16(0xAC34))        // mod time (~12:34)
+            lh.appendLE(UInt16(0x4A21))        // mod date (~2026‑06‑24)
+            lh.appendLE(crc)
+            lh.appendLE(UInt32(entry.data.count))
+            lh.appendLE(UInt32(entry.data.count))
+            lh.appendLE(UInt16(nameData.count))
+            lh.appendLE(UInt16(0))
             lh.append(nameData)
 
             localData.append(lh)
@@ -56,23 +56,23 @@ enum ZipHelper {
 
             // ── Central directory entry ─────────────────────────────
             var ce = Data()
-            ce.append(UInt32(0x02014b50).littleEndian)     // signature
-            ce.append(UInt16(20).littleEndian)              // version made by
-            ce.append(UInt16(20).littleEndian)              // version needed
-            ce.append(UInt16(0).littleEndian)               // flags
-            ce.append(UInt16(0).littleEndian)               // method: stored
-            ce.append(UInt16(0xAC34).littleEndian)          // mod time
-            ce.append(UInt16(0x4A21).littleEndian)          // mod date
-            ce.append(crc.littleEndian)
-            ce.append(UInt32(entry.data.count).littleEndian)
-            ce.append(UInt32(entry.data.count).littleEndian)
-            ce.append(UInt16(nameData.count).littleEndian)
-            ce.append(UInt16(0).littleEndian)               // extra field length
-            ce.append(UInt16(0).littleEndian)               // file comment length
-            ce.append(UInt16(0).littleEndian)               // disk number
-            ce.append(UInt16(0).littleEndian)               // internal attributes
-            ce.append(UInt32(0).littleEndian)               // external attributes
-            ce.append(offset.littleEndian)                  // offset of local header
+            ce.appendLE(UInt32(0x02014b50))     // signature
+            ce.appendLE(UInt16(20))              // version made by
+            ce.appendLE(UInt16(20))              // version needed
+            ce.appendLE(UInt16(0))               // flags
+            ce.appendLE(UInt16(0))               // method: stored
+            ce.appendLE(UInt16(0xAC34))          // mod time
+            ce.appendLE(UInt16(0x4A21))          // mod date
+            ce.appendLE(crc)
+            ce.appendLE(UInt32(entry.data.count))
+            ce.appendLE(UInt32(entry.data.count))
+            ce.appendLE(UInt16(nameData.count))
+            ce.appendLE(UInt16(0))               // extra field length
+            ce.appendLE(UInt16(0))               // file comment length
+            ce.appendLE(UInt16(0))               // disk number
+            ce.appendLE(UInt16(0))               // internal attributes
+            ce.appendLE(UInt32(0))               // external attributes
+            ce.appendLE(offset)                  // offset of local header
             ce.append(nameData)
 
             centralDirectory.append(ce)
@@ -82,14 +82,14 @@ enum ZipHelper {
         // ── End of central directory ────────────────────────────────
         var eocd = Data()
         let centralOffset = UInt32(localData.count)
-        eocd.append(UInt32(0x06054b50).littleEndian)      // signature
-        eocd.append(UInt16(0).littleEndian)                // disk #
-        eocd.append(UInt16(0).littleEndian)                // disk # with CD
-        eocd.append(UInt16(entries.count).littleEndian)    // entries on disk
-        eocd.append(UInt16(entries.count).littleEndian)    // total entries
-        eocd.append(UInt32(centralDirectory.count).littleEndian)
-        eocd.append(centralOffset.littleEndian)
-        eocd.append(UInt16(0).littleEndian)                // comment length
+        eocd.appendLE(UInt32(0x06054b50))      // signature
+        eocd.appendLE(UInt16(0))                // disk #
+        eocd.appendLE(UInt16(0))                // disk # with CD
+        eocd.appendLE(UInt16(entries.count))    // entries on disk
+        eocd.appendLE(UInt16(entries.count))    // total entries
+        eocd.appendLE(UInt32(centralDirectory.count))
+        eocd.appendLE(centralOffset)
+        eocd.appendLE(UInt16(0))                // comment length
 
         var zip = Data()
         zip.append(localData)
@@ -304,6 +304,13 @@ private extension Data {
     func read<T: FixedWidthInteger>(_: T.Type, at offset: Int) -> T {
         return withUnsafeBytes { ptr in
             ptr.loadUnaligned(fromByteOffset: offset, as: T.self)
+        }
+    }
+
+    mutating func appendLE<T>(_ value: T) {
+        var value = value
+        withUnsafeBytes(of: &value) {
+            append(contentsOf: $0)
         }
     }
 }

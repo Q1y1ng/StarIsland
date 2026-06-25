@@ -105,6 +105,7 @@ jobs:
 
       - name: Build (Debug, No Signing)
         run: |
+          set -o pipefail
           xcodebuild clean build \
             -project "$PROJECT_NAME.xcodeproj" \
             -scheme "$SCHEME" \
@@ -115,12 +116,42 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             2>&1 | tee build.log
 
+      - name: Scan Build Errors
+        if: always()
+        run: |
+          echo "===== Build Errors (Debug) ====="
+          grep -n "error:" build.log || true
+          echo ""
+          echo "===== Error count ====="
+          grep -c "error:" build.log || true
+        continue-on-error: true
+
       - name: Upload Build Log
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-log
           path: build.log
+          retention-days: 30
+
+      - name: Upload Error Scan
+        if: always()
+        run: |
+          {
+            echo "===== Build Errors (Debug) ====="
+            grep -n "error:" build.log || echo "(no errors)"
+            echo ""
+            echo "===== Error count ====="
+            grep -c "error:" build.log || echo "0"
+          } > error-scan-debug.txt
+        continue-on-error: true
+
+      - name: Upload Error Scan Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-scan
+          path: error-scan-debug.txt
           retention-days: 30
 
   # ── Job 2: Unsigned IPA — workflow_dispatch only ─────────────────────────
@@ -179,6 +210,7 @@ jobs:
 
       - name: Build Release .app (No Signing)
         run: |
+          set -o pipefail
           xcodebuild clean build \
             -project "$PROJECT_NAME.xcodeproj" \
             -scheme "$SCHEME" \
@@ -423,6 +455,36 @@ jobs:
         with:
           name: build-release-log
           path: build-release.log
+          retention-days: 30
+
+      - name: Scan Release Build Errors
+        if: always()
+        run: |
+          echo "===== Build Errors (Release) ====="
+          grep -n "error:" build-release.log || true
+          echo ""
+          echo "===== Error count ====="
+          grep -c "error:" build-release.log || true
+        continue-on-error: true
+
+      - name: Upload Release Error Scan
+        if: always()
+        run: |
+          {
+            echo "===== Build Errors (Release) ====="
+            grep -n "error:" build-release.log || echo "(no errors)"
+            echo ""
+            echo "===== Error count ====="
+            grep -c "error:" build-release.log || echo "0"
+          } > error-scan-release.txt
+        continue-on-error: true
+
+      - name: Upload Release Error Scan Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-scan-release
+          path: error-scan-release.txt
           retention-days: 30
 
       - name: Upload Unsigned IPA
