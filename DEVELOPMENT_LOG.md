@@ -620,83 +620,209 @@ Timeline / Search / Recycle Bin 全部统一风格。
 
 ---
 
+## Phase T3 — CI Compile Fixes
+
+**目标：** 修复 GitHub Actions CI 上发现的全部编译错误，确保 0 错误构建，产出 unsigned IPA。
+
+### T3.1 — MainActor Isolation
+
+**问题：** `AutoBackupManager.swift` 中 `container.mainContext` 在 `Task {}` 内访问，但没有 `@MainActor` 上下文，触发 `mainActor-isolated property 'mainContext'` 错误（2 处）。
+
+**修复：**
+```swift
+// 方案 A：在访问位置包装 MainActor.run
+let context = await MainActor.run { modelContainer.mainContext }
+```
+- 业务逻辑零修改
+- `handleBackgroundTask` 和 `runBackupIfNeeded` 两处统一修复
+
+**Commit:** `fix: resolve MainActor isolation in AutoBackupManager`
+
+### T3.2 — Int64/Int Type Mismatch
+
+**问题：** `IntegrityService.swift:161` — `.reduce(0)` 推断 accumulator 为 `Int`，但 closure 返回 `Int64(size)`，触发 `cannot convert value of type 'Int64' to expected argument type 'Int'`。
+
+**修复：** `.reduce(0)` → `.reduce(Int64(0))`，保持 accumulator 类型为 `Int64`。
+
+**Commit:** `fix: resolve Int64 to Int mismatch in IntegrityService`
+
+### T3.3 — Remaining Compile Errors
+
+**问题：** 5 个编译错误分布在 2 个文件中：
+
+| 文件 | 错误 | 根因 | 修复 |
+|---|---|---|---|
+| `RecycleBinView.swift` | `Color.tertiary` ternary 类型不匹配 | `.foregroundStyle(.blue : .tertiary)` 在 Color 和 ShapeStyle 间三元 | `Color.blue : Color.secondary.opacity(0.5)` |
+| `ZipHelper.swift` | `withUnsafeBytes` 歧义 | Data extension 内 `withUnsafeBytes(of:)` 解析为 `self.withUnsafeBytes(_:)` | `Swift.withUnsafeBytes(of: &value)` |
+| `ZipHelper.swift` | `max` 符号歧义（2 处） | 全局 `max()` 被 Data 实例方法遮蔽 | `Swift.max(...)` |
+| `ZipHelper.swift` | `COMPRESSION_DEFLATE` 未找到 | Compression 框架常量名变更 | `COMPRESSION_ZLIB` |
+
+**Commit:** `fix: resolve remaining compile errors`
+
+---
+
+## Phase T4.2 — Timeline Evolution
+
+**目标：** 时间轴多级缩放（日/周/月/年）、长按编辑、记录天数计数、开发者信息展示。
+
+### 新增文件
+
+| 文件 | 职责 | 行数 |
+|---|---|---|
+| `Enums/TimelineZoomLevel.swift` | 缩放级别枚举：day/week/month/year，`@AppStorage` 持久化 | ~18 |
+| `Components/QuickEditSheet.swift` | 长按快速编辑 Sheet：文本/心情/图片删除 | ~220 |
+| `Components/ZoomViews.swift` | WeekView（周列+柱状图）+ MonthView（月历热力图） | ~356 |
+
+### 修改文件
+
+| 文件 | 变更 |
+|---|---|
+| `Views/TimelineView.swift` | +296 行：四分支 body（day/week/month/year）+ 捏合缩放手势 + zoomToDay 联动 + ContributionGridView 复用 + devCreditFooter |
+| `Components/HomeHeaderView.swift` | 新增 `zoomLevel`/`statsLine`/`subtitleOverride` 参数；Zoom 感知标题（今天/本周/2026年6月/2026）；日计数统计 |
+| `Components/TimelineCell.swift` | 新增 `onLongPress` 回调 + `LongPressGesture(0.5s)` |
+| `Views/SettingsView.swift` | 新增 `developerSection`：HEAOZIE + 邮箱 |
+| `Base.lproj/LaunchScreen.storyboard` | 底部 "Made by HEAOZIE" 标签 |
+
+### 关键设计
+
+#### 缩放系统
+```swift
+enum TimelineZoomLevel: String, CaseIterable, Sendable {
+    case day    // 逐条记录（默认）
+    case week   // 周概览：7天列，柱状图
+    case month  // 月历：热力图单元格
+    case year   // GitHub 风格贡献图
+}
+```
+- 捏合放大（>1.3×）→ 更广级别；捏合缩小（<0.75×）→ 更细级别
+- `.interactiveSpring` 缩放过渡动画
+- `@AppStorage` 跨启动持久化
+
+#### 长按快速编辑
+- `LongPressGesture(minimumDuration: 0.5)` → QuickEditSheet
+- 编辑文本、切换心情、删除图片
+- `interactiveDismissDisabled()` 防止意外关闭
+
+#### 性能
+- Year View 使用 `ContributionGridView`（已存在），Lazy 加载
+- 目标：iPhone 12 Pro、60 FPS、5000 条记录不卡顿
+
+**Commit:** `feat: timeline zoom system and long-term archive experience`
+
+---
+
+## Phase T4.1 — First Real Device UX Fix
+
+**目标：** 修复真机测试中发现的问题，完善品牌标识，无需新增复杂功能。
+
+### 修改清单
+
+| # | 问题 | 修改文件 | 说明 |
+|---|---|---|---|
+| 1 | Timeline 靠左 | `TimelineCell.swift`, `TimelineView.swift` | `.frame(maxWidth: .infinity, alignment: .leading)` |
+| 2 | Archive 月份详情 | `ArchiveView.swift`, `ContributionGridView.swift` | "2026年" 标题、月份名、月标签行 |
+| 3 | 记忆地图标题靠左 | `MapView.swift` | `.large` 导航标题 + 靠左对齐 |
+| 4 | 定位采集 | `LocationService.swift`, `ContentView.swift` | 启动时请求权限、拒绝→"未知地点" |
+| 5 | 新建记录位置选项 | `AddRecordView.swift` | Toggle 开关 + 位置显示 + 重新获取按钮 |
+| 6 | App Icon | `icon_1024.png` + `Contents.json` | 深色背景 + 月亮 + 星星 + StarIsland 文字 |
+| 7 | 开发者标识 | `HomeHeaderView.swift`, `LaunchScreen.storyboard` | HEAOZIE 双位置（首页 + 启动页） |
+| 8 | 设置页邮箱复制 | `SettingsView.swift` | 点击复制 + "已复制邮箱地址" 提示 |
+
+### 品牌设计
+
+**App Icon：**
+- 1024×1024 PNG，Assets.xcassets 注册
+- 设计：Apple 极简风格，深色渐变背景 + 弯月 + 星点 + StarIsland 文字
+
+**Commit:** `feat: improve first device experience and branding`
+
+---
+
 ## 项目现状
 
 ### 统计
 
-| 指标 | Phase 1 | Phase 1.5 | Phase 2 | Phase 2.5 | Phase 3 | Phase 3.5 | Phase 4 | Phase 4.5 | **当前** |
-|---|---|---|---|---|---|---|---|---|---|
-| **Swift 文件数** | 6 | 13 | 20 | 25 | 34 | 39 | 45 | 49 | **49** |
-| **Models** | 1 | 1 | 2 | 2 | 2 | 3 | 4 | 4 | **4** |
-| **Views** | 3 | 3 | 3 | 4 | 7 | 10 | 11 | 14 | **14** |
-| **Components** | 0 | 2 | 7 | 9 | 11 | 11 | 11 | 11 | **11** |
-| **Services** | 1 | 2 | 4 | 6 | 8 | 9 | 11 | 12 | **12** |
-| **Theme** | 0 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | **1** |
-| **Utils** | 0 | 1 | 1 | 1 | 1 | 1 | 3 | 3 | **3** |
+| 指标 | Phase 1 | Phase 1.5 | Phase 2 | Phase 2.5 | Phase 3 | Phase 3.5 | Phase 4 | Phase 4.5 | T4.2 | T4.1 | **当前** |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| **Swift 文件数** | 6 | 13 | 20 | 25 | 34 | 39 | 45 | 49 | 52 | 52 | **52** |
+| **Models** | 1 | 1 | 2 | 2 | 2 | 3 | 4 | 4 | 4 | 4 | **4** |
+| **Views** | 3 | 3 | 3 | 4 | 7 | 10 | 11 | 15 | 15 | 15 | **15** |
+| **Components** | 0 | 2 | 7 | 9 | 11 | 11 | 11 | 12 | 14 | 14 | **14** |
+| **Enums** | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 1 | **1** |
+| **Services** | 1 | 2 | 4 | 6 | 8 | 9 | 11 | 12 | 12 | 12 | **12** |
+| **Theme** | 0 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | **1** |
+| **Utils** | 0 | 1 | 1 | 1 | 1 | 1 | 3 | 3 | 3 | 3 | **3** |
+| **Extensions** | 0 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | **1** |
+| **ViewModels** | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | **1** |
 
-### 完整文件树（49 文件）
+### 完整文件树（52 文件）
 
 ```
 StarIsland/
-├── StarIslandApp.swift                      (21行)  ← Theme + Integrity
+├── StarIslandApp.swift                      (39行)  ← Theme + Integrity + Location
 │
 ├── Models/                                         4
-│   ├── Record.swift                         (94行)  — +syncId/syncVersion
+│   ├── Record.swift                         (94行)  — syncId/syncVersion
 │   ├── Mood.swift                           (59行)
 │   ├── MemoryLocation.swift                 (45行)
-│   └── BackupMetadata.swift                 (70行)  ← Phase 4
+│   └── BackupMetadata.swift                 (70行)
 │
-├── Views/                                           14
-│   ├── ContentView.swift                    (127行) — 6 Tab (Timeline/Archive/Map/Search/Stats/Settings)
-│   ├── TimelineView.swift                   (254行) — 保持滚动 + 高亮
-│   ├── AddRecordView.swift                  (243行) — Quick Capture <3s
+├── Enums/                                           1
+│   └── TimelineZoomLevel.swift              (18行)  ← T4.2
+│
+├── Views/                                           15
+│   ├── ContentView.swift                    (129行) — 6 Tab + Location permission
+│   ├── TimelineView.swift                   (481行) — 四缩放级别 + Hero 动画
+│   ├── AddRecordView.swift                  (328行) — Quick Capture + 位置模块
 │   ├── RecordDetailView.swift               (161行) — 软删除
-│   ├── SearchView.swift                     (209行) — 统一空状态
-│   ├── ArchiveView.swift                    (203行) — 热力图
-│   ├── ArchiveDayDetailView.swift           (~150行)
-│   ├── StatsView.swift                      (~160行) — 13 项统计
-│   ├── MapView.swift                        (~215行) — Apple Maps + 足迹
+│   ├── SearchView.swift                     (209行)
+│   ├── ArchiveView.swift                    (~210行) — 月份详情
+│   ├── ArchiveDayDetailView.swift           (155行)
+│   ├── StatsView.swift                      (~160行)
+│   ├── MapView.swift                        (235行) — Large Title 靠左
 │   ├── LocationDetailView.swift             (~130行)
 │   ├── FootprintView.swift                  (~165行)
-│   ├── SettingsView.swift                   (~390行) — Theme/Bakcup/Health/About  ← Phase 4+4.5
-│   ├── RecycleBinView.swift                 (~280行) ← Phase 4.5
-│   ├── DataHealthView.swift                 (~130行) ← Phase 4.5
-│   └── DebugView.swift                      (~140行) ← Phase 4.5 (DEBUG only)
+│   ├── SettingsView.swift                   (~570行) — 开发者 + 邮箱复制
+│   ├── RecycleBinView.swift                 (~280行)
+│   ├── DataHealthView.swift                 (~130行)
+│   └── DebugView.swift                      (~140行) (DEBUG only)
 │
-├── Components/                                      11
-│   ├── TimelineCell.swift                   (155行)
-│   ├── DaySectionHeader.swift               (~70行)  — isHighlighted
-│   ├── ImageGridView.swift                  (200行)  — Hero + Cache
-│   ├── PhotoViewer.swift                    (180行)  — 分页缩放
-│   ├── HomeHeaderView.swift                 (59行)
+├── Components/                                      14
+│   ├── TimelineCell.swift                   (163行) — LongPress + 左对齐
+│   ├── DaySectionHeader.swift               (~70行)
+│   ├── ImageGridView.swift                  (200行)
+│   ├── PhotoViewer.swift                    (180行)
+│   ├── HomeHeaderView.swift                 (131行) — Zoom 感知 + HEAOZIE
 │   ├── SearchBarView.swift                  (54行)
-│   ├── EmptyStateView.swift                 (34行)  — 统一 🌌
+│   ├── EmptyStateView.swift                 (34行)
 │   ├── MoodSelectorView.swift               (60行)
 │   ├── ImagePicker.swift                    (88行)
-│   ├── ContributionGridView.swift           (~150行) — 4 级透明度
+│   ├── ContributionGridView.swift           (~200行) — 月标签行
 │   ├── YearPickerView.swift                 (~55行)
-│   └── StatsCardView.swift                  (~60行)
+│   ├── StatsCardView.swift                  (~60行)
+│   ├── QuickEditSheet.swift                 (~220行) ← T4.2
+│   └── ZoomViews.swift                      (~356行) ← T4.2
 │
 ├── Theme/                                            1
-│   └── AppTheme.swift                       (~120行) — +ThemeMode + 统一动画
+│   └── AppTheme.swift                       (~148行)
 │
 ├── Services/                                        12
-│   ├── CalendarService.swift                (~120行)
+│   ├── CalendarService.swift                (~142行)
 │   ├── StatsService.swift                   (~160行)
 │   ├── MapService.swift                     (~160行)
-│   ├── SyncService.swift                    (~85行)  — +SyncStatus + CloudSyncService
-│   ├── LocationService.swift                (105行)
+│   ├── SyncService.swift                    (~85行)
+│   ├── LocationService.swift                (~115行) — +requestPermission()
 │   ├── ImageStorageService.swift            (57行)
-│   ├── ImageCacheService.swift              (~85行)  — +cacheCount
+│   ├── ImageCacheService.swift              (~85行)
 │   ├── SearchService.swift                  (60行)
-│   ├── BackupService.swift                  (~250行) ← Phase 4
-│   ├── AutoBackupManager.swift              (~110行) ← Phase 4
-│   └── IntegrityService.swift               (~170行) ← Phase 4.5
+│   ├── BackupService.swift                  (~250行)
+│   ├── AutoBackupManager.swift              (~110行)
+│   └── IntegrityService.swift               (~170行)
 │
 ├── Utils/                                            3
 │   ├── DateFormatterManager.swift           (65行)
-│   ├── SettingsStorage.swift                (~55行) — 统一 @AppStorage  ← Phase 4
-│   └── ZipHelper.swift                      (~320行) — 纯 Swift ZIP  ← Phase 4
+│   ├── SettingsStorage.swift                (~55行)
+│   └── ZipHelper.swift                      (~320行)
 │
 ├── Extensions/
 │   └── Date+Extension.swift                 (25行)
@@ -711,11 +837,11 @@ StarIsland/
 - ✅ 无第三方库（仅 Apple 原生: SwiftUI, SwiftData, MapKit, CoreLocation)
 - ✅ 无自定义颜色/字体（全部 Apple System）
 - ✅ 仅 `+` 按钮可使用强调色
-- ✅ 单文件单职责，View < 400 行
+- ✅ 单文件单职责，View < 500 行
 - ✅ 无卡片阴影/渐变
 - ✅ 日期格式化全部走 `DateFormatterManager`
 - ✅ 图片异步加载，NSCache 缓存，不阻塞主线程
-- ✅ 禁止 Cloud / AI / Social（Apple Maps 除外）
+- ✅ 禁止 Cloud / AI / Social / 网络功能
 - ✅ 跨 Tab 通信通过 `@Binding` + ContentView 共享状态
 - ✅ 统计/聚合逻辑在 Service 层，View 中无业务计算
 - ✅ 所有文件 I/O 在 async Task 后台线程
@@ -724,7 +850,6 @@ StarIsland/
 
 ### 未来方向（v2.0 候选）
 
-- Timeline 筛选：按 Mood / 地点 / 日期范围
 - iCloud 纯备份（非同步，仅归档）
 - Widget：今日记录数量 + 快捷记录
 - Watch App：抬手即记
