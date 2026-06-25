@@ -247,7 +247,7 @@ enum ZipHelper {
 
     private static func locateEOCD(in data: Data) throws -> Data {
         // EOCD signature is at most 65557 bytes from the end (max comment = 65535)
-        let searchStart = max(0, data.count - 65557)
+        let searchStart = Swift.max(0, data.count - 65557)
         for i in (searchStart ..< data.count - 3).reversed() {
             if data.read(UInt32.self, at: i) == 0x06054b50 {
                 return Data(data[i...])
@@ -309,7 +309,7 @@ private extension Data {
 
     mutating func appendLE<T>(_ value: T) {
         var value = value
-        withUnsafeBytes(of: &value) {
+        Swift.withUnsafeBytes(of: &value) {
             append(contentsOf: $0)
         }
     }
@@ -324,17 +324,17 @@ private extension Data {
 private extension Data {
 
     /// Inflate (decompress) raw deflate data using the Compression framework.
-    /// ZIP method 8 uses **raw** deflate (no zlib header), so we pass
-    /// `COMPRESSION_DEFLATE` rather than `COMPRESSION_ZLIB`.
+    /// ZIP method 8 uses **raw** deflate (no zlib header).
+    /// Uses `COMPRESSION_ZLIB` which handles both zlib-wrapped and raw deflate.
     func inflate() -> Data? {
         let source = self
-        var output = Data(count: max(source.count * 4, 4096))
+        var output = Data(count: Swift.max(source.count * 4, 4096))
         var stream = UnsafeMutablePointer<compression_stream>.allocate(capacity: 1)
         defer { stream.deallocate() }
 
         var status = compression_stream_init(stream,
                                               COMPRESSION_STREAM_DECODE,
-                                              COMPRESSION_DEFLATE)
+                                              COMPRESSION_ZLIB)
         guard status != COMPRESSION_STATUS_ERROR else { return nil }
 
         defer { compression_stream_destroy(stream) }

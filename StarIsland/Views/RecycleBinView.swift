@@ -126,7 +126,7 @@ struct RecycleBinView: View {
         HStack(spacing: AppTheme.spacing.medium) {
             if isEditing {
                 Image(systemName: selectedIDs.contains(record.id) ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(selectedIDs.contains(record.id) ? .blue : .tertiary)
+                    .foregroundStyle(selectedIDs.contains(record.id) ? Color.blue : Color.secondary.opacity(0.5))
                     .onTapGesture {
                         if selectedIDs.contains(record.id) {
                             selectedIDs.remove(record.id)
