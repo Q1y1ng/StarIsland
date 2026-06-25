@@ -34,24 +34,29 @@ struct ContributionGridView: View {
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: cellSpacing) {
-                // ── Weekday labels ────────────────────────────────────
-                weekdayLabelsColumn
+            VStack(alignment: .leading, spacing: cellSpacing) {
+                // ── Month labels ───────────────────────────────────────
+                monthLabelsRow
 
-                // ── Week columns ──────────────────────────────────────
-                ForEach(weeks) { week in
-                    VStack(spacing: cellSpacing) {
-                        ForEach(0 ..< 7, id: \.self) { dayIndex in
-                            Group {
-                                if let day = week.days[dayIndex] {
-                                    RoundedRectangle(cornerRadius: AppTheme.cornerRadius.small)
-                                        .fill(heatmapColor(for: day.count))
-                                        .frame(width: cellSize, height: cellSize)
-                                        .contentShape(Rectangle())
-                                        .onTapGesture { onTapDay?(day.date) }
-                                } else {
-                                    Color.clear
-                                        .frame(width: cellSize, height: cellSize)
+                HStack(alignment: .top, spacing: cellSpacing) {
+                    // ── Weekday labels ────────────────────────────────
+                    weekdayLabelsColumn
+
+                    // ── Week columns ──────────────────────────────────
+                    ForEach(weeks) { week in
+                        VStack(spacing: cellSpacing) {
+                            ForEach(0 ..< 7, id: \.self) { dayIndex in
+                                Group {
+                                    if let day = week.days[dayIndex] {
+                                        RoundedRectangle(cornerRadius: AppTheme.cornerRadius.small)
+                                            .fill(heatmapColor(for: day.count))
+                                            .frame(width: cellSize, height: cellSize)
+                                            .contentShape(Rectangle())
+                                            .onTapGesture { onTapDay?(day.date) }
+                                    } else {
+                                        Color.clear
+                                            .frame(width: cellSize, height: cellSize)
+                                    }
                                 }
                             }
                         }
@@ -60,6 +65,52 @@ struct ContributionGridView: View {
             }
             .padding(.vertical, AppTheme.spacing.small)
         }
+    }
+
+    // MARK: - Month Labels
+
+    /// Row of abbreviated month names that appear above the grid columns.
+    /// Only the first week of each calendar month gets a label.
+    private var monthLabelsRow: some View {
+        let labels = monthBoundaries
+        return HStack(spacing: cellSpacing) {
+            // Spacer to align with weekday label column width
+            Color.clear
+                .frame(width: cellSize * 1.5 + AppTheme.spacing.xxsmall)
+
+            ForEach(weeks.indices, id: \.self) { index in
+                let week = weeks[index]
+                if let label = labels[index] {
+                    Text(label)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: cellSize, alignment: .leading)
+                } else {
+                    Color.clear
+                        .frame(width: cellSize)
+                }
+            }
+        }
+    }
+
+    /// Maps week index → month label or nil.  Labels appear only at the
+    /// first week column that contains a day from that month.
+    private var monthBoundaries: [Int: String] {
+        var result: [Int: String] = [:]
+        var seenMonths = Set<Int>()
+
+        for (index, week) in weeks.enumerated() {
+            for day in week.days {
+                guard let d = day else { continue }
+                let month = Calendar.current.component(.month, from: d.date)
+                if !seenMonths.contains(month) {
+                    seenMonths.insert(month)
+                    result[index] = "\(month)月"
+                    break
+                }
+            }
+        }
+        return result
     }
 
     // MARK: - Weekday Labels

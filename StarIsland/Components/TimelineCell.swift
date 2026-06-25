@@ -36,6 +36,7 @@ struct TimelineCell: View {
             timelineIndicator
             contentArea
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, AppTheme.spacing.xlarge)
         .padding(.vertical, AppTheme.spacing.medium)
         .opacity(appeared ? 1 : 0.6)

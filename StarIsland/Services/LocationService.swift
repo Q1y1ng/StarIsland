@@ -22,6 +22,15 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
 
     // MARK: - Public API
 
+    /// Requests location permission on app launch (fire‑and‑forget).
+    /// Call this once during `ContentView.onAppear`.
+    func requestPermission() {
+        let status = manager.authorizationStatus
+        if status == .notDetermined {
+            manager.requestWhenInUseAuthorization()
+        }
+    }
+
     /// Returns the current place name and coordinates.
     ///
     /// - Important: Does **not** block — completion is called on the main
@@ -47,7 +56,7 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
             case .authorizedAlways, .authorizedWhenInUse:
                 manager.requestLocation()
             case .denied, .restricted:
-                continuation.resume(returning: (nil, nil, nil))
+                continuation.resume(return: ("未知地点", nil, nil))
                 self.continuation = nil
             @unknown default:
                 continuation.resume(returning: (nil, nil, nil))

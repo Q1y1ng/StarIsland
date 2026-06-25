@@ -92,9 +92,15 @@ struct ArchiveView: View {
     private var archiveHeader: some View {
         VStack(alignment: .leading, spacing: AppTheme.spacing.medium) {
             // ── Current year ──────────────────────────────────────
-            Text("\(currentYear)")
-                .font(.system(size: 34, weight: .bold))
-                .foregroundStyle(.primary)
+            HStack(alignment: .firstTextBaseline, spacing: AppTheme.spacing.medium) {
+                Text("\(currentYear)年")
+                    .font(.system(size: 34, weight: .bold))
+                    .foregroundStyle(.primary)
+
+                Text(currentMonthName)
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+            }
 
             // ── Summary line ──────────────────────────────────────
             HStack(spacing: AppTheme.spacing.medium) {
@@ -156,7 +162,14 @@ struct ArchiveView: View {
         }
     }
 
-    // MARK: - Data Loading
+    // MARK: - Helpers
+
+    private var currentMonthName: String {
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "zh_CN")
+        fmt.dateFormat = "M月"
+        return fmt.string(from: Date())
+    }
 
     private func loadData() {
         let counts = CalendarService.queryRecordCounts(for: currentYear, context: context)

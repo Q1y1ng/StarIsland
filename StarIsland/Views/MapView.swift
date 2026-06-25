@@ -115,8 +115,8 @@ struct MapView: View {
             .padding(.bottom, AppTheme.spacing.medium)
         }
         .background(Color(.systemBackground))
-        .navigationTitle("地图")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("记忆地图")
+        .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -149,11 +149,6 @@ struct MapView: View {
             Text("🗺️")
                 .font(.system(size: 36))
                 .padding(.bottom, AppTheme.spacing.xxsmall)
-
-            Text("记忆地图")
-                .font(.largeTitle)
-                .fontWeight(.bold)
-                .foregroundStyle(.primary)
 
             HStack(spacing: AppTheme.spacing.medium) {
                 Text("共 \(locations.count) 个地点")
