@@ -78,7 +78,7 @@ final class AutoBackupManager {
             defer { semaphore.signal() }
             do {
                 let container = try ModelContainer(for: Record.self)
-                let context = container.mainContext
+                let context = await MainActor.run { container.mainContext }
                 try await BackupService.performAutoBackup(context: context)
                 task.setTaskCompleted(success: true)
             } catch {
@@ -107,7 +107,7 @@ final class AutoBackupManager {
 
         do {
             let container = try ModelContainer(for: Record.self)
-            let context = container.mainContext
+            let context = await MainActor.run { container.mainContext }
             try await BackupService.performAutoBackup(context: context)
             scheduleNext()
         } catch {
