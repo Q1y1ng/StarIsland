@@ -157,7 +157,7 @@ private struct WeekDayRow: View {
     }
 
     private var barColor: Color {
-        dayInfo.recordCount == 0 ? .quaternary : Color.blue.opacity(barOpacity)
+        dayInfo.recordCount == 0 ? Color.secondary.opacity(0.1) : Color.blue.opacity(barOpacity)
     }
 
     private var barWidthRatio: CGFloat {
@@ -332,7 +332,7 @@ private struct MonthDayCell: View {
 
     private var foregroundColor: Color {
         if isToday { return .blue }
-        return count > 0 ? .primary : .tertiary
+        return count > 0 ? Color.primary : Color.secondary.opacity(0.4)
     }
 
     private var heatmapOpacity: Double {
