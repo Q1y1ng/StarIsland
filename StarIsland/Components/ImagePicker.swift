@@ -12,6 +12,14 @@ struct CameraPicker: UIViewControllerRepresentable {
     }
 
     func makeUIViewController(context: Context) -> UIImagePickerController {
+        // Guard: camera must be available on this device
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+            // Return a no-op picker; the coordinator logs the failure
+            let picker = UIImagePickerController()
+            picker.delegate = context.coordinator
+            return picker
+        }
+
         let picker = UIImagePickerController()
         picker.sourceType = .camera
         picker.delegate = context.coordinator
@@ -37,6 +45,10 @@ struct CameraPicker: UIViewControllerRepresentable {
                let data = image.jpegData(compressionQuality: 0.8) {
                 parent.imageData = data
             }
+        }
+
+        func imagePickerControllerDidCancel(_: UIImagePickerController) {
+            // User dismissed — no action needed
         }
     }
 }

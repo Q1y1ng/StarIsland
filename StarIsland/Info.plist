@@ -50,6 +50,8 @@
 	<array>
 		<string>com.starisland.autobackup</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>StarIsland 需要使用相机来记录瞬间。</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 </dict>

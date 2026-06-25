@@ -26,6 +26,7 @@ struct AddRecordView: View {
     @State private var showingCamera = false
     @State private var cameraImageData: Data?
     @State private var isSaving = false
+    @State private var cameraError: String?
 
     // ── Location state ────────────────────────────────────────────
     @State private var locationName: String?
@@ -72,6 +73,14 @@ struct AddRecordView: View {
                 CameraPicker(imageData: $cameraImageData)
                     .ignoresSafeArea()
                     .onDisappear { handleCameraImage() }
+            }
+            .alert("相机不可用", isPresented: .init(
+                get: { cameraError != nil },
+                set: { if !$0 { cameraError = nil } }
+            )) {
+                Button("好", role: .cancel) {}
+            } message: {
+                Text(cameraError ?? "")
             }
         }
         .onAppear {
@@ -148,6 +157,10 @@ struct AddRecordView: View {
         ToolbarItem(placement: .principal) {
             HStack(spacing: AppTheme.spacing.medium) {
                 Button {
+                    guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+                        cameraError = "此设备不支持相机"
+                        return
+                    }
                     showingCamera = true
                 } label: {
                     Image(systemName: "camera.fill")
