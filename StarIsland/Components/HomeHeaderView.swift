@@ -44,6 +44,13 @@ struct HomeHeaderView: View {
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .padding(.top, AppTheme.spacing.xxxsmall)
+
+            if zoomLevel == .day {
+                Text("HEAOZIE")
+                    .font(.caption2)
+                    .foregroundStyle(.quaternary.opacity(0.5))
+                    .padding(.top, AppTheme.spacing.xxxsmall)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, AppTheme.spacing.xlarge)

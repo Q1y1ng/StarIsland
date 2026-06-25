@@ -27,6 +27,13 @@ struct AddRecordView: View {
     @State private var cameraImageData: Data?
     @State private var isSaving = false
 
+    // ── Location state ────────────────────────────────────────────
+    @State private var locationName: String?
+    @State private var locationLatitude: Double?
+    @State private var locationLongitude: Double?
+    @State private var isLocationEnabled = true
+    @State private var isFetchingLocation = false
+
     @FocusState private var isFocused: Bool
 
     private let locationService = LocationService()
@@ -39,6 +46,13 @@ struct AddRecordView: View {
             VStack(spacing: 0) {
                 // ── Mood selector ──────────────────────────────────
                 MoodSelectorView(selection: $selectedMood)
+
+                Divider()
+
+                // ── Location module ────────────────────────────────
+                locationModule
+                    .padding(.horizontal, AppTheme.spacing.xlarge)
+                    .padding(.vertical, AppTheme.spacing.small)
 
                 Divider()
 
@@ -158,6 +172,88 @@ struct AddRecordView: View {
         }
     }
 
+    // MARK: - Location Module
+
+    @ViewBuilder
+    private var locationModule: some View {
+        VStack(spacing: AppTheme.spacing.small) {
+            HStack {
+                // Toggle
+                Toggle(isOn: $isLocationEnabled) {
+                    HStack(spacing: AppTheme.spacing.medium) {
+                        Image(systemName: "location.fill")
+                            .foregroundStyle(isLocationEnabled ? .blue : .tertiary)
+                            .font(.subheadline)
+                        Text("记录位置")
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                    }
+                }
+                .toggleStyle(.switch)
+            }
+
+            if isLocationEnabled {
+                HStack(spacing: AppTheme.spacing.medium) {
+                    if isFetchingLocation {
+                        HStack(spacing: AppTheme.spacing.small) {
+                            ProgressView()
+                                .controlSize(.mini)
+                            Text("正在获取位置...")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                    } else if let name = locationName {
+                        Image(systemName: "location.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.blue)
+                        Text(name)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Image(systemName: "location.slash")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        Text("未知地点")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+
+                    Spacer()
+
+                    Button {
+                        fetchLocation()
+                    } label: {
+                        Text("重新获取")
+                            .font(.caption)
+                            .foregroundStyle(.blue)
+                    }
+                    .disabled(isFetchingLocation)
+                }
+                .padding(.leading, AppTheme.spacing.xxlarge)
+            }
+        }
+        .onAppear {
+            if isLocationEnabled {
+                fetchLocation()
+            }
+        }
+    }
+
+    // MARK: - Fetch Location
+
+    private func fetchLocation() {
+        isFetchingLocation = true
+        Task {
+            let result = await locationService.requestLocation()
+            await MainActor.run {
+                locationName = result.locationName
+                locationLatitude = result.latitude
+                locationLongitude = result.longitude
+                isFetchingLocation = false
+            }
+        }
+    }
+
     // MARK: - Actions
 
     private func handleCameraImage() {
@@ -179,24 +275,13 @@ struct AddRecordView: View {
         let record = Record(
             text: trimmed,
             mood: selectedMood,
-            imagePaths: imagePaths
+            imagePaths: imagePaths,
+            locationName: isLocationEnabled ? (locationName ?? "未知地点") : nil,
+            latitude: isLocationEnabled ? locationLatitude : nil,
+            longitude: isLocationEnabled ? locationLongitude : nil
         )
 
         modelContext.insert(record)
-
-        // ── Location (fire & forget — never blocks save) ──────
-        Task {
-            let result = await locationService.requestLocation()
-            guard let name = result.locationName else { return }
-
-            await MainActor.run {
-                record.locationName = name
-                record.latitude = result.latitude
-                record.longitude = result.longitude
-                try? modelContext.save()
-            }
-        }
-
         try? modelContext.save()
         dismiss()
     }

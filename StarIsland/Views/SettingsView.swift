@@ -37,6 +37,7 @@ struct SettingsView: View {
     @State private var importError: Error?
     @State private var showingErrorAlert = false
     @State private var backupCount: Int = 0
+    @State private var showEmailCopiedAlert = false
 
     // MARK: - Body
 
@@ -84,6 +85,9 @@ struct SettingsView: View {
             Button("好", role: .cancel) {}
         } message: {
             Text(importError?.localizedDescription ?? "未知错误")
+        }
+        .alert("已复制邮箱地址", isPresented: $showEmailCopiedAlert) {
+            Button("好", role: .cancel) {}
         }
         .fileExporter(
             isPresented: $showingExporter,
@@ -326,6 +330,11 @@ struct SettingsView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                UIPasteboard.general.string = "s3431248075@163.com"
+                showEmailCopiedAlert = true
             }
         } header: {
             Label("开发者", systemImage: "hammer.fill")

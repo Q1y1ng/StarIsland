@@ -65,6 +65,7 @@ struct TimelineView: View {
                     .zIndex(100)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .simultaneousGesture(magnificationGesture)
         .animation(.interactiveSpring(response: 0.35, dampingFraction: 0.86), value: zoomLevel)
         .toolbar { toolbarContent }
@@ -138,6 +139,7 @@ struct TimelineView: View {
                     devCreditFooter
                 }
                 .padding(.vertical, AppTheme.spacing.large)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             .onChange(of: scrollToDate) { _, newDate in
                 guard let date = newDate else { return }
