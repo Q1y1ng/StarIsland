@@ -125,7 +125,8 @@ struct AddRecordView: View {
 
     private var imageStrip: some View {
         ImageGridView(imagePaths: imagePaths, maxDisplay: 9)
-            .frame(maxHeight: 300)
+            .frame(height: 260)
+            .clipped()
             .padding(.horizontal, AppTheme.spacing.xlarge)
             .padding(.vertical, AppTheme.spacing.small)
     }
@@ -145,6 +146,14 @@ struct AddRecordView: View {
         // ── Camera ────────────────────────────────────────────
         ToolbarItem(placement: .principal) {
             HStack(spacing: AppTheme.spacing.medium) {
+                VoiceRecordButton { transcription in
+                    if text.isEmpty {
+                        text = transcription
+                    } else {
+                        text = text + "\n" + transcription
+                    }
+                }
+
                 Button {
                     guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
                         showingPhotoFallback = true

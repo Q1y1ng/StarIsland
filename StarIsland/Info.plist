@@ -52,6 +52,16 @@
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>StarIsland 需要使用相机来记录瞬间。</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>StarIsland 需要使用您的位置信息来记录地点。</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>StarIsland 需要访问相册以选择照片。</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>StarIsland 需要保存照片到相册。</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>StarIsland 需要使用麦克风记录语音。</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>StarIsland 需要使用语音识别将录音转为文字。</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 </dict>
