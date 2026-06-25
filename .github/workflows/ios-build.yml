@@ -52,6 +52,43 @@ jobs:
       - name: Generate Xcode Project
         run: xcodegen generate
 
+      - name: Inspect PBXProj
+        run: |
+          {
+            echo "===== PBXSourcesBuildPhase ====="
+            grep -n "PBXSourcesBuildPhase" StarIsland.xcodeproj/project.pbxproj -A 300
+
+            echo ""
+            echo "===== Compile Sources Entries ====="
+            grep -n "in Sources" StarIsland.xcodeproj/project.pbxproj | head -300
+
+            echo ""
+            echo "===== Swift Files In Repository ====="
+            find StarIsland -name "*.swift" | sort
+
+            echo ""
+            echo "===== PBXNativeTarget ====="
+            grep -n "PBXNativeTarget" StarIsland.xcodeproj/project.pbxproj -A 100
+          } > pbxproj-dump.txt
+          echo "pbxproj-dump.txt written ($(wc -c < pbxproj-dump.txt) bytes)"
+
+      - name: Verify Compile Sources
+        run: |
+          COUNT=$(grep -c "in Sources" StarIsland.xcodeproj/project.pbxproj || true)
+          echo "Compile Sources Count = $COUNT"
+          if [ "$COUNT" -lt 5 ]; then
+            echo "❌ Compile Sources seems empty"
+            exit 1
+          fi
+
+      - name: Upload PBXProj Dump
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pbxproj-dump
+          path: pbxproj-dump.txt
+          retention-days: 30
+
       - name: Run Build Diagnostic
         run: |
           chmod +x Scripts/ci-diagnose.sh
@@ -110,6 +147,35 @@ jobs:
 
       - name: Generate Xcode Project
         run: xcodegen generate
+
+      - name: Inspect PBXProj
+        run: |
+          {
+            echo "===== PBXSourcesBuildPhase ====="
+            grep -n "PBXSourcesBuildPhase" StarIsland.xcodeproj/project.pbxproj -A 300
+
+            echo ""
+            echo "===== Compile Sources Entries ====="
+            grep -n "in Sources" StarIsland.xcodeproj/project.pbxproj | head -300
+
+            echo ""
+            echo "===== Swift Files In Repository ====="
+            find StarIsland -name "*.swift" | sort
+
+            echo ""
+            echo "===== PBXNativeTarget ====="
+            grep -n "PBXNativeTarget" StarIsland.xcodeproj/project.pbxproj -A 100
+          } > pbxproj-dump.txt
+          echo "pbxproj-dump.txt written ($(wc -c < pbxproj-dump.txt) bytes)"
+
+      - name: Verify Compile Sources
+        run: |
+          COUNT=$(grep -c "in Sources" StarIsland.xcodeproj/project.pbxproj || true)
+          echo "Compile Sources Count = $COUNT"
+          if [ "$COUNT" -lt 5 ]; then
+            echo "❌ Compile Sources seems empty"
+            exit 1
+          fi
 
       - name: Build Release .app (No Signing)
         run: |
@@ -325,6 +391,14 @@ jobs:
         with:
           name: ipa-structure
           path: build/ipa-structure.txt
+          retention-days: 30
+
+      - name: Upload PBXProj Dump
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pbxproj-dump
+          path: pbxproj-dump.txt
           retention-days: 30
 
       - name: Upload Build Settings
