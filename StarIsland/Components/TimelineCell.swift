@@ -26,6 +26,9 @@ struct TimelineCell: View {
     var heroFilename: String?
     var onHeroTap: (([String], Int) -> Void)?
 
+    /// Callback for quick‑edit long press.
+    var onLongPress: ((Record) -> Void)?
+
     @State private var appeared = false
 
     var body: some View {
@@ -38,6 +41,10 @@ struct TimelineCell: View {
         .opacity(appeared ? 1 : 0.6)
         .scaleEffect(x: appeared ? 1 : 0.97, anchor: .top)
         .onAppear { animateAppear() }
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.5)
+                .onEnded { _ in onLongPress?(record) }
+        )
     }
 
     // MARK: - Animation

@@ -59,6 +59,9 @@ struct SettingsView: View {
 
             // ── About ───────────────────────────────────────────────
             aboutSection
+
+            // ── Developer ────────────────────────────────────────────
+            developerSection
         }
         .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.inline)
@@ -292,6 +295,40 @@ struct SettingsView: View {
             }
         } header: {
             Label("维护", systemImage: "wrench.adjustable")
+        }
+    }
+
+    // MARK: - Developer Section
+
+    private var developerSection: some View {
+        Section {
+            HStack(spacing: AppTheme.spacing.medium) {
+                Image(systemName: "person.fill")
+                    .foregroundStyle(.secondary)
+                    .font(.title3)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("开发者")
+                        .font(.body)
+                    Text("HEAOZIE")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack(spacing: AppTheme.spacing.medium) {
+                Image(systemName: "envelope.fill")
+                    .foregroundStyle(.secondary)
+                    .font(.title3)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("邮箱")
+                        .font(.body)
+                    Text("s3431248075@163.com")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } header: {
+            Label("开发者", systemImage: "hammer.fill")
         }
     }
 
