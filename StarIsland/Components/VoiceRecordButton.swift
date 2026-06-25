@@ -35,9 +35,17 @@ struct VoiceRecordButton: View {
         } label: {
             Image(systemName: phase == .recording ? "stop.circle.fill" : "mic.fill")
                 .font(.title3)
-                .foregroundStyle(phase == .recording ? .red : (phase == .processing ? .tertiary : .primary))
+                .foregroundStyle(micColor)
         }
         .disabled(phase == .processing)
+    }
+
+    private var micColor: Color {
+        switch phase {
+        case .idle:      return .primary
+        case .recording: return .red
+        case .processing: return .secondary
+        }
     }
 
     // MARK: - Recording
