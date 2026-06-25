@@ -195,7 +195,7 @@ struct AddRecordView: View {
                 Toggle(isOn: $isLocationEnabled) {
                     HStack(spacing: AppTheme.spacing.medium) {
                         Image(systemName: "location.fill")
-                            .foregroundStyle(isLocationEnabled ? .blue : .tertiary)
+                            .foregroundStyle(isLocationEnabled ? Color.blue : Color.secondary.opacity(0.5))
                             .font(.subheadline)
                         Text("记录位置")
                             .font(.subheadline)
@@ -288,10 +288,10 @@ struct AddRecordView: View {
         let record = Record(
             text: trimmed,
             mood: selectedMood,
-            imagePaths: imagePaths,
             locationName: isLocationEnabled ? (locationName ?? "未知地点") : nil,
             latitude: isLocationEnabled ? locationLatitude : nil,
-            longitude: isLocationEnabled ? locationLongitude : nil
+            longitude: isLocationEnabled ? locationLongitude : nil,
+            imagePaths: imagePaths
         )
 
         modelContext.insert(record)
