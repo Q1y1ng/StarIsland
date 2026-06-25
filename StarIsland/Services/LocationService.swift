@@ -56,7 +56,7 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
             case .authorizedAlways, .authorizedWhenInUse:
                 manager.requestLocation()
             case .denied, .restricted:
-                continuation.resume(return: ("未知地点", nil, nil))
+                continuation.resume(returning: ("未知地点", nil, nil))
                 self.continuation = nil
             @unknown default:
                 continuation.resume(returning: (nil, nil, nil))
