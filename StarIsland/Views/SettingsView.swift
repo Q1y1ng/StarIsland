@@ -412,14 +412,16 @@ struct SettingsView: View {
         case .success(let urls):
             guard let url = urls.first else { return }
 
-            guard url.startAccessingSecurityScopedResource() else {
-                importError = BackupError.missingRecords
-                showingErrorAlert = true
-                return
-            }
-            defer { url.stopAccessingSecurityScopedResource() }
-
             Task {
+                guard url.startAccessingSecurityScopedResource() else {
+                    await MainActor.run {
+                        importError = BackupError.missingRecords
+                        showingErrorAlert = true
+                    }
+                    return
+                }
+                defer { url.stopAccessingSecurityScopedResource() }
+
                 do {
                     let result = try await BackupService.importBackup(from: url,
                                                                        context: context)

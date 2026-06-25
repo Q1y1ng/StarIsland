@@ -38,17 +38,18 @@ struct CameraPicker: UIViewControllerRepresentable {
         init(_ parent: CameraPicker) { self.parent = parent }
 
         func imagePickerController(
-            _: UIImagePickerController,
+            _ picker: UIImagePickerController,
             didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
         ) {
             if let image = info[.originalImage] as? UIImage,
                let data = image.jpegData(compressionQuality: 0.8) {
                 parent.imageData = data
             }
+            picker.dismiss(animated: true)
         }
 
-        func imagePickerControllerDidCancel(_: UIImagePickerController) {
-            // User dismissed — no action needed
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            picker.dismiss(animated: true)
         }
     }
 }
