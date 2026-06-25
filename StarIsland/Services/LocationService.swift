@@ -62,6 +62,16 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
                 continuation.resume(returning: (nil, nil, nil))
                 self.continuation = nil
             }
+
+            // ── Timeout: 10 seconds ──────────────────────────
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(10))
+                guard let self, self.continuation != nil else { return }
+                self.continuation?.resume(
+                    returning: ("定位失败", nil, nil)
+                )
+                self.continuation = nil
+            }
         }
     }
 
@@ -87,10 +97,10 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
         // Reverse geocode on a background queue
         let geocoder = CLGeocoder()
         geocoder.reverseGeocodeLocation(location) { [weak self] placemarks, _ in
-            let name: String? = {
-                guard let mk = placemarks?.first else { return nil }
+            let name: String = {
+                guard let mk = placemarks?.first else { return "未知地点" }
                 // Prefer the locality (city/town name), fall back to thoroughfare
-                return mk.locality ?? mk.name
+                return mk.locality ?? mk.name ?? "未知地点"
             }()
 
             let result: LocationResult = (

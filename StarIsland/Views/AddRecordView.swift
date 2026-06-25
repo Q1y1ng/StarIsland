@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import PhotosUI
 
 // MARK: - Add Record View
 
@@ -27,6 +28,8 @@ struct AddRecordView: View {
     @State private var cameraImageData: Data?
     @State private var isSaving = false
     @State private var cameraError: String?
+    @State private var showingPhotoFallback = false
+    @State private var fallbackPhotoItems: [PhotosPickerItem] = []
 
     // ── Location state ────────────────────────────────────────────
     @State private var locationName: String?
@@ -82,6 +85,15 @@ struct AddRecordView: View {
             } message: {
                 Text(cameraError ?? "")
             }
+            .photosPicker(
+                isPresented: $showingPhotoFallback,
+                selection: $fallbackPhotoItems,
+                maxSelectionCount: maxImages - imagePaths.count,
+                matching: .images
+            )
+            .onChange(of: fallbackPhotoItems) { _, items in
+                loadFallbackPhotos(items)
+            }
         }
         .onAppear {
             // Quick Capture: auto-focus
@@ -112,33 +124,10 @@ struct AddRecordView: View {
     // MARK: - Image Strip
 
     private var imageStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: AppTheme.spacing.medium) {
-                ForEach(imagePaths, id: \.self) { path in
-                    ZStack(alignment: .topTrailing) {
-                        LocalImageThumb(filename: path)
-                            .frame(width: 64, height: 64)
-                            .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius.small))
-
-                        Button {
-                            withAnimation {
-                                ImageStorageService.delete(path)
-                                imagePaths.removeAll { $0 == path }
-                            }
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.caption)
-                                .foregroundStyle(.white)
-                                .background(Circle().fill(.black.opacity(0.5)))
-                        }
-                        .offset(x: 4, y: -4)
-                    }
-                }
-            }
+        ImageGridView(imagePaths: imagePaths, maxDisplay: 9)
+            .frame(maxHeight: 300)
             .padding(.horizontal, AppTheme.spacing.xlarge)
             .padding(.vertical, AppTheme.spacing.small)
-        }
-        .frame(height: 80)
     }
 
     // MARK: - Toolbar
@@ -158,7 +147,7 @@ struct AddRecordView: View {
             HStack(spacing: AppTheme.spacing.medium) {
                 Button {
                     guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
-                        cameraError = "此设备不支持相机"
+                        showingPhotoFallback = true
                         return
                     }
                     showingCamera = true
@@ -277,6 +266,24 @@ struct AddRecordView: View {
         }
         cameraImageData = nil
         imagePaths.append(filename)
+    }
+
+    private func loadFallbackPhotos(_ items: [PhotosPickerItem]) {
+        guard !items.isEmpty else { return }
+        let remaining = maxImages - imagePaths.count
+        Task {
+            var newPaths: [String] = []
+            for item in items where newPaths.count < remaining {
+                if let data = try? await item.loadTransferable(type: Data.self),
+                   let filename = ImageStorageService.save(data) {
+                    newPaths.append(filename)
+                }
+            }
+            await MainActor.run {
+                imagePaths.append(contentsOf: newPaths)
+                fallbackPhotoItems = []
+            }
+        }
     }
 
     private func saveRecord() {
