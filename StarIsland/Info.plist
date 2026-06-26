@@ -64,5 +64,53 @@
 	<string>StarIsland 需要使用语音识别将录音转为文字。</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconFiles</key>
+			<array>
+				<string>AppIcon</string>
+			</array>
+		</dict>
+		<key>CFBundleAlternateIcons</key>
+		<dict>
+			<key>AppIconBlue</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array>
+					<string>AppIconBlue</string>
+				</array>
+			</dict>
+			<key>AppIconPurple</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array>
+					<string>AppIconPurple</string>
+				</array>
+			</dict>
+			<key>AppIconBlack</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array>
+					<string>AppIconBlack</string>
+				</array>
+			</dict>
+			<key>AppIconOrange</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array>
+					<string>AppIconOrange</string>
+				</array>
+			</dict>
+			<key>AppIconGreen</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array>
+					<string>AppIconGreen</string>
+				</array>
+			</dict>
+		</dict>
+	</dict>
 </dict>
 </plist>

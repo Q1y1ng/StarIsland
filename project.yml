@@ -95,3 +95,23 @@ targets:
         NSMicrophoneUsageDescription: "StarIsland 需要使用麦克风记录语音。"
         NSSpeechRecognitionUsageDescription: "StarIsland 需要使用语音识别将录音转为文字。"
         UIApplicationSupportsIndirectInputEvents: true
+        CFBundleIcons:
+          CFBundlePrimaryIcon:
+            CFBundleIconFiles:
+              - AppIcon
+          CFBundleAlternateIcons:
+            AppIconBlue:
+              CFBundleIconFiles:
+                - AppIconBlue
+            AppIconPurple:
+              CFBundleIconFiles:
+                - AppIconPurple
+            AppIconBlack:
+              CFBundleIconFiles:
+                - AppIconBlack
+            AppIconOrange:
+              CFBundleIconFiles:
+                - AppIconOrange
+            AppIconGreen:
+              CFBundleIconFiles:
+                - AppIconGreen

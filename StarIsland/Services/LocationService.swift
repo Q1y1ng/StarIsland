@@ -158,20 +158,29 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
                     return fallback
                 }
 
-                // Priority-based location name resolution
-                // 1. POI / place name (most precise)
-                if let name = mk.name, !name.isEmpty {
-                    print("[Location] reverse geocode – name(POI): \(name)")
-                    return name
+                // Street-first priority (T4.6):
+                // 1. Thoroughfare + subThoroughfare (street + number)
+                // 2. Sub-locality (neighborhood)
+                // 3. Thoroughfare (street only)
+                // 4. Sub-administrative area + locality (district + city)
+                // 5. Locality (city)
+                // 6. POI / place name (last resort — avoid shop names)
+                // 7. Coordinates
+
+                // 1. Thoroughfare + subThoroughfare (e.g. "长安中路 118号")
+                let subThoroughfare = mk.subThoroughfare.flatMap { $0.isEmpty ? nil : $0 }
+                let thoroughfare = mk.thoroughfare.flatMap { $0.isEmpty ? nil : $0 }
+                if let thr = thoroughfare, let sub = subThoroughfare {
+                    let result = "\(thr) \(sub)"
+                    print("[Location] reverse geocode – thoroughfare+sub: \(result)")
+                    return result
                 }
 
-                // 2. Sub-locality + thoroughfare (e.g. "小寨 · 长安中路")
+                // 2. Sub-locality (neighborhood / area, e.g. "小寨")
                 let subLocality = mk.subLocality.flatMap { $0.isEmpty ? nil : $0 }
-                let thoroughfare = mk.thoroughfare.flatMap { $0.isEmpty ? nil : $0 }
-                if let sub = subLocality, let thr = thoroughfare {
-                    let result = "\(sub) · \(thr)"
-                    print("[Location] reverse geocode – subLocality+thoroughfare: \(result)")
-                    return result
+                if let sub = subLocality {
+                    print("[Location] reverse geocode – subLocality: \(sub)")
+                    return sub
                 }
 
                 // 3. Thoroughfare only (e.g. "长安中路")
@@ -195,7 +204,13 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
                     return loc
                 }
 
-                // 6. Fallback: coordinates
+                // 6. POI / place name (avoid if possible — usually shop names)
+                if let name = mk.name, !name.isEmpty {
+                    print("[Location] reverse geocode – name(POI): \(name)")
+                    return name
+                }
+
+                // 7. Coordinates
                 let lat = location.coordinate.latitude
                 let lng = location.coordinate.longitude
                 let fallback = String(format: "%.4f, %.4f", lat, lng)

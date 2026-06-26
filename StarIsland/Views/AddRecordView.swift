@@ -4,19 +4,18 @@ import PhotosUI
 
 // MARK: - Add Record View
 
-/// Modal sheet for creating a new time-slice record (Phase 2 Capture System).
+/// Modal sheet for creating a new time-slice record (Phase T4.6 UX).
 ///
-/// ## Quick Capture
-/// - TextEditor auto-focuses on appear
-/// - Keyboard opens immediately — no tap needed
-/// - Save + dismiss is one tap away
-/// - Target: 3 seconds per record
-///
-/// ## Capabilities
-/// - Mood selection via ``MoodSelectorView``
-/// - Camera capture (up to 9 images)
-/// - Photo library selection (up to 9 images)
-/// - Location auto-resolution via ``LocationService``
+/// ## Layout (Apple Journal style)
+/// ```
+/// Emoji picker
+/// Toolbar (camera / photo library)
+/// Location (tappable → LocationPickerView)
+/// Title text
+/// Body text
+/// ──────────────────────────────
+/// Image strip (horizontal scroll, 110×110)
+/// ```
 struct AddRecordView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -37,6 +36,11 @@ struct AddRecordView: View {
     @State private var locationLongitude: Double?
     @State private var isLocationEnabled = true
     @State private var isFetchingLocation = false
+    @State private var showingLocationPicker = false
+
+    // ── Image viewer state ────────────────────────────────────────
+    @State private var viewerIndex: Int?
+    @State private var showViewer = false
 
     @FocusState private var isFocused: Bool
 
@@ -47,28 +51,43 @@ struct AddRecordView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                // ── Mood selector ──────────────────────────────────
-                MoodSelectorView(selection: $selectedMood)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    // ── Mood selector ──────────────────────────────
+                    moodSection
 
-                Divider()
-
-                // ── Location module ────────────────────────────────
-                locationModule
-                    .padding(.horizontal, AppTheme.spacing.xlarge)
-                    .padding(.vertical, AppTheme.spacing.small)
-
-                Divider()
-
-                // ── Image strip ────────────────────────────────────
-                if !imagePaths.isEmpty {
-                    imageStrip
                     Divider()
-                }
+                        .padding(.horizontal, AppTheme.spacing.xlarge)
 
-                // ── Text editor ────────────────────────────────────
-                textEditor
+                    // ── Toolbar (camera / photo) ──────────────────
+                    toolbarSection
+                        .padding(.horizontal, AppTheme.spacing.xlarge)
+                        .padding(.vertical, AppTheme.spacing.medium)
+
+                    Divider()
+                        .padding(.horizontal, AppTheme.spacing.xlarge)
+
+                    // ── Location (tappable) ───────────────────────
+                    locationSection
+                        .padding(.horizontal, AppTheme.spacing.xlarge)
+                        .padding(.vertical, AppTheme.spacing.medium)
+
+                    Divider()
+                        .padding(.horizontal, AppTheme.spacing.xlarge)
+
+                    // ── Text editor ───────────────────────────────
+                    textSection
+                        .padding(.horizontal, AppTheme.spacing.xlarge)
+                        .padding(.top, AppTheme.spacing.medium)
+
+                    // ── Image strip (always at bottom) ────────────
+                    if !imagePaths.isEmpty || imagePaths.count < maxImages {
+                        imageStrip
+                            .padding(.top, AppTheme.spacing.medium)
+                    }
+                }
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("新记录")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
@@ -94,137 +113,132 @@ struct AddRecordView: View {
             .onChange(of: fallbackPhotoItems) { _, items in
                 loadFallbackPhotos(items)
             }
-        }
-        .onAppear {
-            // Quick Capture: auto-focus
-            isFocused = true
-        }
-    }
-
-    // MARK: - Text Editor
-
-    private var textEditor: some View {
-        TextEditor(text: $text)
-            .font(.body)
-            .focused($isFocused)
-            .scrollContentBackground(.hidden)
-            .background(Color(.systemBackground))
-            .overlay(alignment: .topLeading) {
-                if text.isEmpty {
-                    Text("记录这一刻...")
-                        .foregroundStyle(.tertiary)
-                        .padding(.top, AppTheme.spacing.medium)
-                        .padding(.leading, AppTheme.spacing.xsmall)
-                        .allowsHitTesting(false)
-                }
-            }
-            .padding(AppTheme.spacing.xlarge)
-    }
-
-    // MARK: - Image Strip
-
-    private var imageStrip: some View {
-        ImageGridView(imagePaths: imagePaths, maxDisplay: 9)
-            .frame(height: 260)
-            .clipped()
-            .padding(.horizontal, AppTheme.spacing.xlarge)
-            .padding(.vertical, AppTheme.spacing.small)
-    }
-
-    // MARK: - Toolbar
-
-    @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .cancellationAction) {
-            Button("取消") {
-                // Clean up unsaved images
-                ImageStorageService.delete(imagePaths)
-                dismiss()
-            }
-        }
-
-        // ── Camera ────────────────────────────────────────────
-        ToolbarItem(placement: .principal) {
-            HStack(spacing: AppTheme.spacing.medium) {
-                VoiceRecordButton { transcription in
-                    if text.isEmpty {
-                        text = transcription
-                    } else {
-                        text = text + "\n" + transcription
-                    }
-                }
-
-                Button {
-                    guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
-                        print("[AddRecord] camera unavailable, falling back to photo picker")
-                        showingPhotoFallback = true
-                        return
-                    }
-                    print("[AddRecord] presenting camera (existing images: \(imagePaths.count))")
-                    showingCamera = true
-                } label: {
-                    Image(systemName: "camera.fill")
-                }
-                .disabled(imagePaths.count >= maxImages)
-
-                ImagePickerView(
-                    imagePaths: $imagePaths,
-                    maxSelection: maxImages
+            .sheet(isPresented: $showingLocationPicker) {
+                LocationPickerView(
+                    selectedName: $locationName,
+                    selectedLatitude: $locationLatitude,
+                    selectedLongitude: $locationLongitude
                 )
             }
+            .fullScreenCover(isPresented: $showViewer) {
+                if let idx = viewerIndex {
+                    PhotoViewer(imagePaths: imagePaths, initialIndex: idx)
+                }
+            }
         }
-
-        // ── Save ──────────────────────────────────────────────
-        ToolbarItem(placement: .confirmationAction) {
-            Button("保存") { saveRecord() }
-                .disabled({
-                    let noText = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    let noImages = imagePaths.isEmpty
-                    let noLocation = !(isLocationEnabled && (locationName != nil))
-                    return (noText && noImages && noLocation) || isSaving
-                }())
-                .fontWeight(.semibold)
+        .onAppear {
+            isFocused = true
+            if isLocationEnabled && locationName == nil {
+                fetchLocation()
+            }
         }
     }
 
-    // MARK: - Location Module
+    // MARK: - Mood Section
 
-    @ViewBuilder
-    private var locationModule: some View {
+    private var moodSection: some View {
         VStack(spacing: AppTheme.spacing.small) {
-            HStack {
-                // Toggle
-                Toggle(isOn: $isLocationEnabled) {
-                    HStack(spacing: AppTheme.spacing.medium) {
-                        Image(systemName: "location.fill")
-                            .foregroundStyle(isLocationEnabled ? Color.blue : Color.secondary.opacity(0.5))
-                            .font(.subheadline)
-                        Text("记录位置")
-                            .font(.subheadline)
-                            .foregroundStyle(.primary)
-                    }
-                }
-                .toggleStyle(.switch)
+            // Large emoji display
+            if let mood = selectedMood {
+                Text(mood.emoji)
+                    .font(.system(size: 48))
+                    .transition(.scale.combined(with: .opacity))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.7), value: selectedMood)
             }
 
-            if isLocationEnabled {
+            MoodSelectorView(selection: $selectedMood)
+                .padding(.horizontal, AppTheme.spacing.xlarge)
+        }
+        .padding(.vertical, AppTheme.spacing.medium)
+    }
+
+    // MARK: - Toolbar Section
+
+    private var toolbarSection: some View {
+        HStack(spacing: AppTheme.spacing.xlarge) {
+            // Camera button
+            Button {
+                guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+                    print("[AddRecord] camera unavailable, falling back to photo picker")
+                    showingPhotoFallback = true
+                    return
+                }
+                print("[AddRecord] presenting camera (existing images: \(imagePaths.count))")
+                showingCamera = true
+            } label: {
+                Label("拍照", systemImage: "camera.fill")
+                    .font(.subheadline)
+            }
+            .disabled(imagePaths.count >= maxImages)
+
+            // Photo library button
+            ImagePickerView(
+                imagePaths: $imagePaths,
+                maxSelection: maxImages
+            )
+
+            Spacer()
+
+            // Voice record button
+            VoiceRecordButton { transcription in
+                if text.isEmpty {
+                    text = transcription
+                } else {
+                    text = text + "\n" + transcription
+                }
+            }
+        }
+    }
+
+    // MARK: - Location Section
+
+    @ViewBuilder
+    private var locationSection: some View {
+        HStack {
+            // Toggle
+            Toggle(isOn: $isLocationEnabled) {
                 HStack(spacing: AppTheme.spacing.medium) {
-                    if isFetchingLocation {
+                    Image(systemName: "location.fill")
+                        .foregroundStyle(isLocationEnabled ? Color.blue : Color.secondary.opacity(0.5))
+                        .font(.subheadline)
+                    Text("记录位置")
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                }
+            }
+            .toggleStyle(.switch)
+        }
+
+        if isLocationEnabled {
+            HStack(spacing: AppTheme.spacing.medium) {
+                if isFetchingLocation {
+                    HStack(spacing: AppTheme.spacing.small) {
+                        ProgressView()
+                            .controlSize(.mini)
+                        Text("正在获取位置...")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                } else if let name = locationName {
+                    // Tappable location name → opens LocationPickerView
+                    Button {
+                        showingLocationPicker = true
+                    } label: {
                         HStack(spacing: AppTheme.spacing.small) {
-                            ProgressView()
-                                .controlSize(.mini)
-                            Text("正在获取位置...")
+                            Image(systemName: "location.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.blue)
+                            Text(name)
                                 .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                            Image(systemName: "chevron.down")
+                                .font(.caption2)
                                 .foregroundStyle(.tertiary)
                         }
-                    } else if let name = locationName {
-                        Image(systemName: "location.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.blue)
-                        Text(name)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
+                    }
+                } else {
+                    HStack(spacing: AppTheme.spacing.small) {
                         Image(systemName: "location.slash")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
@@ -232,9 +246,11 @@ struct AddRecordView: View {
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                     }
+                }
 
-                    Spacer()
+                Spacer()
 
+                if !isFetchingLocation {
                     Button {
                         fetchLocation()
                     } label: {
@@ -244,13 +260,131 @@ struct AddRecordView: View {
                     }
                     .disabled(isFetchingLocation)
                 }
-                .padding(.leading, AppTheme.spacing.xxlarge)
+            }
+            .padding(.leading, AppTheme.spacing.xxlarge)
+        }
+    }
+
+    // MARK: - Text Section
+
+    private var textSection: some View {
+        TextEditor(text: $text)
+            .font(.body)
+            .scrollContentBackground(.hidden)
+            .background(Color(.systemBackground))
+            .frame(minHeight: 120)
+            .focused($isFocused)
+            .overlay(alignment: .topLeading) {
+                if text.isEmpty {
+                    Text("记录这一刻...")
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, AppTheme.spacing.medium)
+                        .padding(.leading, AppTheme.spacing.xsmall)
+                        .allowsHitTesting(false)
+                }
+            }
+    }
+
+    // MARK: - Image Strip
+
+    private var imageStrip: some View {
+        VStack(alignment: .leading, spacing: AppTheme.spacing.small) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: AppTheme.spacing.medium) {
+                    // Existing images
+                    ForEach(imagePaths.indices, id: \.self) { idx in
+                        imageThumb(filename: imagePaths[idx], index: idx)
+                    }
+
+                    // Add button (last cell)
+                    if imagePaths.count < maxImages {
+                        addImageButton
+                    }
+                }
+                .padding(.horizontal, AppTheme.spacing.xlarge)
             }
         }
-        .onAppear {
-            if isLocationEnabled {
-                fetchLocation()
+        .frame(height: 130)
+    }
+
+    private func imageThumb(filename: String, index: Int) -> some View {
+        LocalImageThumb(filename: filename)
+            .frame(width: 110, height: 110)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .shadow(color: .black.opacity(0.1), radius: 12, x: 0, y: 4)
+            .overlay(alignment: .topTrailing) {
+                // Delete button
+                Button {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        imagePaths.remove(at: index)
+                    }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.white)
+                        .background(Circle().fill(.black.opacity(0.5)))
+                        .padding(4)
+                }
             }
+            .onTapGesture {
+                viewerIndex = index
+                showViewer = true
+            }
+            .transition(.scale.combined(with: .opacity))
+    }
+
+    private var addImageButton: some View {
+        Button {
+            showImagePicker()
+        } label: {
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(.tertiary, lineWidth: 1)
+                .frame(width: 110, height: 110)
+                .overlay {
+                    VStack(spacing: AppTheme.spacing.small) {
+                        Image(systemName: "plus")
+                            .font(.title2)
+                            .foregroundStyle(.tertiary)
+                        Text("\(imagePaths.count)/\(maxImages)")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+        }
+        .transition(.scale.combined(with: .opacity))
+    }
+
+    private func showImagePicker() {
+        let remaining = maxImages - imagePaths.count
+        guard remaining > 0 else { return }
+
+        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+            showingCamera = true
+        } else {
+            showingPhotoFallback = true
+        }
+    }
+
+    // MARK: - Toolbar
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
+            Button("取消") {
+                ImageStorageService.delete(imagePaths)
+                dismiss()
+            }
+        }
+
+        ToolbarItem(placement: .confirmationAction) {
+            Button("保存") { saveRecord() }
+                .disabled({
+                    let noText = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    let noImages = imagePaths.isEmpty
+                    let noLocation = !(isLocationEnabled && (locationName != nil))
+                    return (noText && noImages && noLocation) || isSaving
+                }())
+                .fontWeight(.semibold)
         }
     }
 
@@ -282,7 +416,9 @@ struct AddRecordView: View {
         }
         print("[AddRecord] camera image saved: \(filename) (\(data.count)B)")
         cameraImageData = nil
-        imagePaths.append(filename)
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
+            imagePaths.append(filename)
+        }
     }
 
     private func loadFallbackPhotos(_ items: [PhotosPickerItem]) {
@@ -297,7 +433,9 @@ struct AddRecordView: View {
                 }
             }
             await MainActor.run {
-                imagePaths.append(contentsOf: newPaths)
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
+                    imagePaths.append(contentsOf: newPaths)
+                }
                 fallbackPhotoItems = []
             }
         }
@@ -329,7 +467,7 @@ struct AddRecordView: View {
     }
 }
 
-// MARK: - Local Thumbnail
+// MARK: - Local Image Thumb
 
 /// Small inline thumbnail for the image strip.
 private struct LocalImageThumb: View {
