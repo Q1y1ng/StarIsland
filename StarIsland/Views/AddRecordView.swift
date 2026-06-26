@@ -1,20 +1,21 @@
 import SwiftUI
 import SwiftData
 import PhotosUI
+import CoreLocation
 
 // MARK: - Add Record View
 
-/// Modal sheet for creating a new time-slice record (Phase T4.6 UX).
+/// Modal sheet for creating a new time-slice record (Phase T4.7 UX).
 ///
 /// ## Layout (Apple Journal style)
 /// ```
-/// Emoji picker
-/// Toolbar (camera / photo library)
-/// Location (tappable → LocationPickerView)
-/// Title text
-/// Body text
+/// 😊 Mood selector
+/// 📍 Location (tappable → hierarchy picker / map)
 /// ──────────────────────────────
-/// Image strip (horizontal scroll, 110×110)
+/// Text editor (body)
+/// ──────────────────────────────
+/// 📷 Image strip (horizontal scroll, 110×110)
+/// 🎤 Voice record
 /// ```
 struct AddRecordView: View {
     @Environment(\.modelContext) private var modelContext
@@ -34,9 +35,11 @@ struct AddRecordView: View {
     @State private var locationName: String?
     @State private var locationLatitude: Double?
     @State private var locationLongitude: Double?
+    @State private var locationPlacemark: CLPlacemark?
     @State private var isLocationEnabled = true
     @State private var isFetchingLocation = false
     @State private var showingLocationPicker = false
+    @State private var showingNamePicker = false
 
     // ── Image viewer state ────────────────────────────────────────
     @State private var viewerIndex: Int?
@@ -59,15 +62,7 @@ struct AddRecordView: View {
                     Divider()
                         .padding(.horizontal, AppTheme.spacing.xlarge)
 
-                    // ── Toolbar (camera / photo) ──────────────────
-                    toolbarSection
-                        .padding(.horizontal, AppTheme.spacing.xlarge)
-                        .padding(.vertical, AppTheme.spacing.medium)
-
-                    Divider()
-                        .padding(.horizontal, AppTheme.spacing.xlarge)
-
-                    // ── Location (tappable) ───────────────────────
+                    // ── Location ───────────────────────────────────
                     locationSection
                         .padding(.horizontal, AppTheme.spacing.xlarge)
                         .padding(.vertical, AppTheme.spacing.medium)
@@ -80,11 +75,20 @@ struct AddRecordView: View {
                         .padding(.horizontal, AppTheme.spacing.xlarge)
                         .padding(.top, AppTheme.spacing.medium)
 
-                    // ── Image strip (always at bottom) ────────────
-                    if !imagePaths.isEmpty || imagePaths.count < maxImages {
-                        imageStrip
-                            .padding(.top, AppTheme.spacing.medium)
+                    Divider()
+                        .padding(.horizontal, AppTheme.spacing.xlarge)
+
+                    // ── Bottom: images + voice ─────────────────────
+                    VStack(alignment: .leading, spacing: AppTheme.spacing.medium) {
+                        // Image strip
+                        if !imagePaths.isEmpty || imagePaths.count < maxImages {
+                            imageStrip
+                        }
+
+                        // Voice button
+                        voiceSection
                     }
+                    .padding(.vertical, AppTheme.spacing.medium)
                 }
             }
             .scrollDismissesKeyboard(.interactively)
@@ -117,7 +121,14 @@ struct AddRecordView: View {
                 LocationPickerView(
                     selectedName: $locationName,
                     selectedLatitude: $locationLatitude,
-                    selectedLongitude: $locationLongitude
+                    selectedLongitude: $locationLongitude,
+                    selectedPlacemark: $locationPlacemark
+                )
+            }
+            .sheet(isPresented: $showingNamePicker) {
+                LocationNamePickerSheet(
+                    placemark: locationPlacemark,
+                    selectedName: $locationName
                 )
             }
             .fullScreenCover(isPresented: $showViewer) {
@@ -152,44 +163,6 @@ struct AddRecordView: View {
         .padding(.vertical, AppTheme.spacing.medium)
     }
 
-    // MARK: - Toolbar Section
-
-    private var toolbarSection: some View {
-        HStack(spacing: AppTheme.spacing.xlarge) {
-            // Camera button
-            Button {
-                guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
-                    print("[AddRecord] camera unavailable, falling back to photo picker")
-                    showingPhotoFallback = true
-                    return
-                }
-                print("[AddRecord] presenting camera (existing images: \(imagePaths.count))")
-                showingCamera = true
-            } label: {
-                Label("拍照", systemImage: "camera.fill")
-                    .font(.subheadline)
-            }
-            .disabled(imagePaths.count >= maxImages)
-
-            // Photo library button
-            ImagePickerView(
-                imagePaths: $imagePaths,
-                maxSelection: maxImages
-            )
-
-            Spacer()
-
-            // Voice record button
-            VoiceRecordButton { transcription in
-                if text.isEmpty {
-                    text = transcription
-                } else {
-                    text = text + "\n" + transcription
-                }
-            }
-        }
-    }
-
     // MARK: - Location Section
 
     @ViewBuilder
@@ -220,9 +193,9 @@ struct AddRecordView: View {
                             .foregroundStyle(.tertiary)
                     }
                 } else if let name = locationName {
-                    // Tappable location name → opens LocationPickerView
+                    // Location name → tap for hierarchy picker
                     Button {
-                        showingLocationPicker = true
+                        openNamePicker()
                     } label: {
                         HStack(spacing: AppTheme.spacing.small) {
                             Image(systemName: "location.fill")
@@ -232,10 +205,16 @@ struct AddRecordView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
-                            Image(systemName: "chevron.down")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
                         }
+                    }
+
+                    // Map picker button
+                    Button {
+                        showingLocationPicker = true
+                    } label: {
+                        Image(systemName: "map")
+                            .font(.caption2)
+                            .foregroundStyle(.blue)
                     }
                 } else {
                     HStack(spacing: AppTheme.spacing.small) {
@@ -365,6 +344,27 @@ struct AddRecordView: View {
         }
     }
 
+    // MARK: - Voice Section
+
+    private var voiceSection: some View {
+        HStack(spacing: AppTheme.spacing.medium) {
+            VoiceRecordButton { transcription in
+                if text.isEmpty {
+                    text = transcription
+                } else {
+                    text = text + "\n" + transcription
+                }
+            }
+
+            Text("语音记录")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+
+            Spacer()
+        }
+        .padding(.horizontal, AppTheme.spacing.xlarge)
+    }
+
     // MARK: - Toolbar
 
     @ToolbarContentBuilder
@@ -401,6 +401,35 @@ struct AddRecordView: View {
                 locationLatitude = result.latitude
                 locationLongitude = result.longitude
                 isFetchingLocation = false
+            }
+        }
+    }
+
+    // MARK: - Location Name Picker
+
+    /// Opens the hierarchy picker for choosing address level.
+    /// Fetches placemark from coordinates if not already available.
+    private func openNamePicker() {
+        if locationPlacemark != nil {
+            showingNamePicker = true
+            return
+        }
+
+        guard let lat = locationLatitude, let lng = locationLongitude else { return }
+
+        Task {
+            let geocoder = CLGeocoder()
+            let location = CLLocation(latitude: lat, longitude: lng)
+            let placemarks: [CLPlacemark] = await withCheckedContinuation { continuation in
+                geocoder.reverseGeocodeLocation(location) { marks, _ in
+                    continuation.resume(returning: marks ?? [])
+                }
+            }
+            await MainActor.run {
+                locationPlacemark = placemarks.first
+                if locationPlacemark != nil {
+                    showingNamePicker = true
+                }
             }
         }
     }
@@ -496,6 +525,82 @@ private struct LocalImageThumb: View {
             UIImage(contentsOfFile: url.path)
         }.value
         await MainActor.run { image = img }
+    }
+}
+
+// MARK: - Location Name Picker Sheet
+
+/// Sheet that lets the user choose which address level to save.
+/// Shows all available hierarchy levels from the placemark.
+private struct LocationNamePickerSheet: View {
+    let placemark: CLPlacemark?
+    @Binding var selectedName: String?
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let pm = placemark {
+                    // 1. Door number (thoroughfare + subThoroughfare)
+                    if let thr = pm.thoroughfare, let sub = pm.subThoroughfare {
+                        nameRow("\(thr) \(sub)", subtitle: "门牌号")
+                    }
+                    // 2. Street (thoroughfare only)
+                    if let thr = pm.thoroughfare {
+                        nameRow(thr, subtitle: "街道")
+                    }
+                    // 3. Neighborhood / 商圈 (subLocality)
+                    if let sub = pm.subLocality {
+                        nameRow(sub, subtitle: "社区 · 商圈")
+                    }
+                    // 4. District + city (subAdministrativeArea + locality)
+                    if let sub = pm.subAdministrativeArea, let loc = pm.locality {
+                        nameRow("\(sub) · \(loc)", subtitle: "行政区")
+                    }
+                    // 5. City (locality only)
+                    if let loc = pm.locality {
+                        nameRow(loc, subtitle: "城市")
+                    }
+                    // 6. POI / place name (last resort)
+                    if let name = pm.name {
+                        nameRow(name, subtitle: "POI 名称")
+                    }
+                } else {
+                    Text("无法获取地点详细信息")
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .navigationTitle("选择地点名称")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func nameRow(_ name: String, subtitle: String) -> some View {
+        Button {
+            selectedName = name
+            dismiss()
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name)
+                        .font(.body)
+                        .foregroundStyle(.primary)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+                if let current = selectedName, current == name {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(.blue)
+                }
+            }
+        }
     }
 }
 
