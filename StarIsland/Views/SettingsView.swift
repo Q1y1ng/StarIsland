@@ -452,10 +452,13 @@ struct SettingsView: View {
 
     private func iconDisplayName(_ key: String) -> String {
         switch key {
-        case "default":    return "默认"
-        case "DeepSpace": return "Deep Space"
-        case "White":     return "White"
-        default:          return "默认"
+        case "default":      return "经典蓝"
+        case "AppIconBlue":  return "经典蓝"
+        case "AppIconPurple": return "渐变紫"
+        case "AppIconBlack": return "深空黑"
+        case "AppIconOrange":return "日落橙"
+        case "AppIconGreen": return "森林绿"
+        default:             return "经典蓝"
         }
     }
 
@@ -474,10 +477,12 @@ struct SettingsView: View {
 private struct IconPickerView: View {
     @State private var selectedIcon = SettingsStorage.selectedIcon
 
-    private let icons: [(key: String, name: String, symbol: String)] = [
-        ("default",    "默认",      "star.fill"),
-        ("DeepSpace", "Deep Space", "moon.stars.fill"),
-        ("White",     "White",      "snowflake"),
+    private let icons: [(key: String, name: String, symbol: String, color: Color)] = [
+        ("default",       "经典蓝",  "star.fill",            .blue),
+        ("AppIconPurple", "渐变紫",  "star.circle.fill",     .purple),
+        ("AppIconBlack",  "深空黑",  "moon.stars.fill",      .primary),
+        ("AppIconOrange", "日落橙",  "sun.max.fill",         .orange),
+        ("AppIconGreen",  "森林绿",  "leaf.fill",            .green),
     ]
 
     var body: some View {
@@ -490,12 +495,18 @@ private struct IconPickerView: View {
                         HStack(spacing: AppTheme.spacing.medium) {
                             Image(systemName: icon.symbol)
                                 .font(.title3)
-                                .foregroundStyle(.blue)
+                                .foregroundStyle(icon.color)
                                 .frame(width: 28)
 
-                            Text(icon.name)
-                                .font(.body)
-                                .foregroundStyle(.primary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(icon.name)
+                                    .font(.body)
+                                    .foregroundStyle(.primary)
+
+                                Text(iconDescription(icon.key))
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
 
                             Spacer()
 
@@ -514,6 +525,27 @@ private struct IconPickerView: View {
         }
         .navigationTitle("App 图标")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            // Migrate old icon keys from previous versions
+            let oldValue = SettingsStorage.selectedIcon
+            if oldValue == "DeepSpace" || oldValue == "White" {
+                SettingsStorage.selectedIcon = "default"
+                selectedIcon = "default"
+                #if !targetEnvironment(simulator)
+                UIApplication.shared.setAlternateIconName(nil)
+                #endif
+            }
+        }
+
+    private func iconDescription(_ key: String) -> String {
+        switch key {
+        case "default":       return "默认主图标"
+        case "AppIconPurple": return "紫色渐变风格"
+        case "AppIconBlack":  return "深邃暗色风格"
+        case "AppIconOrange": return "暖色日落风格"
+        case "AppIconGreen":  return "自然森林风格"
+        default:              return ""
+        }
     }
 
     private func selectIcon(_ key: String) {

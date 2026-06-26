@@ -738,6 +738,76 @@ enum TimelineZoomLevel: String, CaseIterable, Sendable {
 
 ---
 
+## Phase T4.5 — Hotfix
+
+**目标：** 三个独立问题修复：定位精度提升（P0）、心情系统扩充（P1）、App Icon 空白（P0）。
+
+### Issue 1 — 定位精度提升（P0）
+
+**问题：** `LocationService` 反向地理编码始终返回 `mk.locality`（总是"西安市"），无法显示具体 POI 或街道名。
+
+**修复：** 将原有的简单 fallback `mk.locality ?? mk.name ?? "未知地点"` 替换为 6 级优先级级联：
+1. POI / place name（最精确）
+2. Sub-locality + thoroughfare（如"小寨 · 长安中路"）
+3. Thoroughfare only（如"长安中路"）
+4. Sub-administrative area + locality（如"雁塔区 · 西安市"）
+5. Locality only（如"西安市"）
+6. Fallback：经纬度坐标
+
+同时为每级分支增加调试日志输出（`[Location] reverse geocode – ...`），便于真机验证实际返回数据。
+
+### Issue 2 — 扩充心情系统（P1）
+
+**问题：** Mood 枚举仅 5 种（happy/neutral/sad/tired/excited），无法覆盖用户真实情感。
+
+**修复：**
+- Mood 从 5 种扩展至 **16 种**（新增 content/surprised/relaxed/celebrating/touched/lost/angry/furious/anxious/nervous/sleepy）
+- **向后兼容：** 保留原有 5 个 case 的 rawValue 不变（`.happy`/`.neutral`/`.sad`/`.tired`/`.excited`），SwiftData 持久化的 mood 字符串自动兼容旧数据
+- Emoji 更新：neutral（😐→😌）、sad（😢→😭）、excited（🔥→😄）
+- 新增 `symbol` 属性：SF Symbol 名称
+- `title`/`color` 属性同步扩展
+- **自动适配：** `MoodSelectorView`（`ForEach(Mood.allCases)`）、`StatsService`（`Dictionary(grouping:)`）、`SearchService`（`Mood.allCases.map(\.emoji)`）均无需手动修改
+
+**行数变化：** `Mood.swift` 59 行 → 144 行（+85 行）
+
+### Issue 3 — App Icon 空白（P0）
+
+**问题：** 桌面 App Icon 显示为空白。根因：`Contents.json` 全部 iPhone 条目缺少 `filename` 键，Asset Catalog 无法匹配对应 PNG。
+
+**修复：**
+- `Contents.json` 全部 18 个条目补充 `filename` 键
+- 从 icon_1024.png 通过 Python PIL 生成 14 个缺失尺寸变体：
+  - iPhone：icon-20@2x/@3x、icon-29@2x/@3x、icon-40@2x/@3x、icon-60@2x/@3x
+  - iPad：icon-20@1x/@2x、icon-29@1x/@2x、icon-40@1x/@2x、icon-76@1x/@2x、icon-83.5@2x
+- `project.yml` 已配置 `ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon` + `ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: YES`，构建时自动生成更小尺寸
+- CI 验证（`.github/workflows/ios-build.yml`）已有 `xcrun assetutil` AppIcon 检查，Debug/Release 均覆盖
+
+### 修改文件清单
+
+| 文件 | 变更 |
+|---|---|
+| `Models/Mood.swift` | 5 case → 16 case，新增 `symbol`，`emoji`/`title`/`color` 全量扩展（59→144 行） |
+| `Services/LocationService.swift` | 6 级精度级联替代单级 fallback，增强调试日志（115→227 行） |
+| `Services/SearchService.swift` | 注释中 emoji token 列表从 5 更新为 16 |
+| `Assets.xcassets/AppIcon.appiconset/Contents.json` | 全部 18 条目补充 `filename` |
+| `Assets.xcassets/AppIcon.appiconset/icon-*.png` | 新增 14 个尺寸变体 |
+
+### 分支同步
+
+三分支均完成提交：
+
+| 分支 | Commit Hash |
+|---|---|
+| **main** | `1bfef22` |
+| **develop** | `3ee862a`（cherry-pick） |
+| **release/v1.0** | `6dd6b46`（cherry-pick）|
+
+> ⚠️ GitHub push 因网络问题（443 端口不通）未能完成，需手动推送
+
+**Commit:** `1bfef22` — `T4.5 Hotfix: 定位精度 + 16心情 + App Icon修复`
+
+---
+
 ## 项目现状
 
 ### 统计
