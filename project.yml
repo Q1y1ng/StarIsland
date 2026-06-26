@@ -87,4 +87,11 @@ targets:
           - processing
         BGTaskSchedulerPermittedIdentifiers:
           - com.starisland.autobackup
+        # ── Required Permission Descriptions ──────────────────
+        NSCameraUsageDescription: "StarIsland 需要使用相机来记录瞬间。"
+        NSLocationWhenInUseUsageDescription: "StarIsland 需要使用您的位置信息来记录地点。"
+        NSPhotoLibraryUsageDescription: "StarIsland 需要访问相册以选择照片。"
+        NSPhotoLibraryAddUsageDescription: "StarIsland 需要保存照片到相册。"
+        NSMicrophoneUsageDescription: "StarIsland 需要使用麦克风记录语音。"
+        NSSpeechRecognitionUsageDescription: "StarIsland 需要使用语音识别将录音转为文字。"
         UIApplicationSupportsIndirectInputEvents: true
