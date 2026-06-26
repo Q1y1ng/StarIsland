@@ -67,7 +67,7 @@ enum AppTheme {
         let large: CGFloat = 12
 
         // Phase 2 — image
-        let image: CGFloat = 10
+        let image: CGFloat = 16
 
         // Phase 2.5 — search
         let searchBar: CGFloat = 10
