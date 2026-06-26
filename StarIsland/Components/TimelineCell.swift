@@ -129,7 +129,7 @@ struct TimelineCell: View {
     @ViewBuilder
     private var imagePreview: some View {
         if !record.imagePaths.isEmpty {
-            let _ = print("[TimelineCell] images: count=\(record.imagePaths.count) maxWidth=280")
+            let _ = print("[TimelineCell] images: count=\(record.imagePaths.count) maxWidth=280 maxHeight=160")
             ImageGridView(
                 imagePaths: record.imagePaths,
                 maxDisplay: 4,
@@ -137,7 +137,8 @@ struct TimelineCell: View {
                 heroFilename: heroFilename,
                 onTapImage: onHeroTap
             )
-            .frame(maxWidth: 280)
+            .frame(maxWidth: 280, maxHeight: 160)
+            .clipped()
         }
     }
 }
