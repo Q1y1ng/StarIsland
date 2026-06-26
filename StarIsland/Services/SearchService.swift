@@ -7,7 +7,8 @@ import SwiftData
 ///
 /// 1. **Text** — matches against `Record.text` (case-insensitive)
 /// 2. **Location** — matches against `Record.locationName`
-/// 3. **Mood** — matches emoji tokens (😊 😐 😢 😴 🔥) against the record's mood
+/// 3. **Mood** — matches emoji tokens (😊 😄 😁 🤩 😌 🙂 🥳 🥰 😭 😢 😤 😡 😰 😥 😴 🥱)
+///    against the record's mood
 ///
 /// All tokens are AND'd: a record must match **every** token to appear.
 /// Multiple dimensions per token are OR'd (text OR location OR mood).
