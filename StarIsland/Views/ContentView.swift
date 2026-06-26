@@ -47,8 +47,6 @@ struct ContentView: View {
     @State private var scrollToDate: Date? = nil
     @State private var focusLocation: String? = nil
 
-    private let locationService = LocationService()
-
     var body: some View {
         TabView(selection: $selectedTab) {
             // ── Timeline ──────────────────────────────────────────
@@ -118,7 +116,7 @@ struct ContentView: View {
             .tag(AppTab.settings)
         }
         .onAppear {
-            locationService.requestPermission()
+            LocationService.shared.requestPermission()
         }
     }
 }

@@ -40,7 +40,7 @@ struct AddRecordView: View {
 
     @FocusState private var isFocused: Bool
 
-    private let locationService = LocationService()
+    private let locationService = LocationService.shared
     private let maxImages = 9
 
     // MARK: - Body
@@ -73,7 +73,7 @@ struct AddRecordView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
             .fullScreenCover(isPresented: $showingCamera) {
-                CameraPicker(imageData: $cameraImageData)
+                CameraPicker(imageData: $cameraImageData, isPresented: $showingCamera)
                     .ignoresSafeArea()
                     .onDisappear { handleCameraImage() }
             }

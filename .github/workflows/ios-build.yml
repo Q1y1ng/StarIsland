@@ -116,6 +116,35 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             2>&1 | tee build.log
 
+      - name: Verify AppIcon in Assets.car
+        run: |
+          echo "===== Locating Assets.car ====="
+          ASSETS_CAR=$(find ~/Library/Developer/Xcode/DerivedData \
+            -name "Assets.car" \
+            -path "*StarIsland*" \
+            -type f 2>/dev/null | head -1)
+          if [ -z "$ASSETS_CAR" ]; then
+            echo "❌ Assets.car not found — AppIcon NOT compiled"
+            exit 1
+          fi
+          echo "Found: $ASSETS_CAR ($(du -h "$ASSETS_CAR" | awk '{print $1}'))"
+
+          echo ""
+          echo "===== AppIcon entries in Assets.car ====="
+          # Use assetutil (bundled with Xcode) to dump asset contents
+          xcrun --sdk iphoneos assetutil --info "$ASSETS_CAR" 2>/dev/null \
+            | grep -E "AppIcon|idiom|size|scale|subtype" \
+            || echo "(no AppIcon entries found — checking with python)"
+
+          # Fallback: grep raw string
+          if ! xcrun --sdk iphoneos assetutil --info "$ASSETS_CAR" 2>/dev/null \
+            | grep -q "AppIcon"; then
+            echo "❌ AppIcon NOT found in Assets.car"
+            xcrun --sdk iphoneos assetutil --info "$ASSETS_CAR" 2>/dev/null | head -30
+            exit 1
+          fi
+          echo "✅ AppIcon found in Assets.car"
+
       - name: Scan Build Errors
         if: always()
         run: |
@@ -324,6 +353,29 @@ jobs:
           echo "===== Bundle Content ====="
           find "$APP_PATH" | head -100
           du -sh "$APP_PATH"
+
+      - name: Verify Release AppIcon in Assets.car
+        run: |
+          echo "===== Locating Release Assets.car ====="
+          ASSETS_CAR=$(find ~/Library/Developer/Xcode/DerivedData \
+            -name "Assets.car" \
+            -path "*StarIsland*" \
+            -path "*Release*" \
+            -type f 2>/dev/null | head -1)
+          if [ -z "$ASSETS_CAR" ]; then
+            echo "❌ Release Assets.car not found"
+            exit 1
+          fi
+          echo "Found: $ASSETS_CAR ($(du -h "$ASSETS_CAR" | awk '{print $1}'))"
+          echo ""
+          echo "===== AppIcon entries ====="
+          if ! xcrun --sdk iphoneos assetutil --info "$ASSETS_CAR" 2>/dev/null \
+            | grep -q "AppIcon"; then
+            echo "❌ AppIcon NOT found in Release Assets.car"
+            xcrun --sdk iphoneos assetutil --info "$ASSETS_CAR" 2>/dev/null | head -30
+            exit 1
+          fi
+          echo "✅ Release AppIcon found in Assets.car"
 
       - name: Package Unsigned IPA
         run: |

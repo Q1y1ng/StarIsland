@@ -4,25 +4,33 @@ import PhotosUI
 // MARK: - Camera Picker
 
 /// `UIImagePickerController` wrapper for taking a photo.
+///
+/// - Important: Do **not** call `picker.dismiss()` inside the coordinator —
+///   SwiftUI's `.fullScreenCover` manages presentation.  Set `isPresented`
+///   to `false` instead; SwiftUI handles the dismiss cleanly.
 struct CameraPicker: UIViewControllerRepresentable {
     @Binding var imageData: Data?
+    @Binding var isPresented: Bool
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
     }
 
     func makeUIViewController(context: Context) -> UIImagePickerController {
-        // Guard: camera must be available on this device
+        let picker = UIImagePickerController()
+        picker.delegate = context.coordinator
+        picker.allowsEditing = false
+
         guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
-            // Return a no-op picker; the coordinator logs the failure
-            let picker = UIImagePickerController()
-            picker.delegate = context.coordinator
+            // Camera unavailable — return a no-op picker; the parent
+            // button in AddRecordView already guards this path, so this
+            // is just a belt‑and‑suspenders safety net.
+            print("[Camera] sourceType .camera NOT available")
             return picker
         }
 
-        let picker = UIImagePickerController()
+        print("[Camera] sourceType .camera available, presenting picker")
         picker.sourceType = .camera
-        picker.delegate = context.coordinator
         picker.cameraCaptureMode = .photo
         return picker
     }
@@ -41,15 +49,22 @@ struct CameraPicker: UIViewControllerRepresentable {
             _ picker: UIImagePickerController,
             didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
         ) {
+            print("[Camera] didFinishPicking")
+
             if let image = info[.originalImage] as? UIImage,
                let data = image.jpegData(compressionQuality: 0.8) {
                 parent.imageData = data
             }
-            picker.dismiss(animated: true)
+
+            // ⚠️  Do NOT call picker.dismiss() — SwiftUI controls
+            //     the fullScreenCover lifecycle.  Toggle the binding
+            //     instead and let SwiftUI dismiss.
+            parent.isPresented = false
         }
 
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            picker.dismiss(animated: true)
+            print("[Camera] didCancel")
+            parent.isPresented = false
         }
     }
 }
