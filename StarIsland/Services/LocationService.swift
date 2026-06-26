@@ -158,10 +158,10 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
                     return fallback
                 }
 
-                // Street-first priority (T4.6):
+                // Street-first priority (T4.7):
                 // 1. Thoroughfare + subThoroughfare (street + number)
-                // 2. Sub-locality (neighborhood)
-                // 3. Thoroughfare (street only)
+                // 2. Thoroughfare only (street, e.g. "长安中路")
+                // 3. Sub-locality (neighborhood / 商圈, e.g. "小寨")
                 // 4. Sub-administrative area + locality (district + city)
                 // 5. Locality (city)
                 // 6. POI / place name (last resort — avoid shop names)
@@ -176,17 +176,17 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
                     return result
                 }
 
-                // 2. Sub-locality (neighborhood / area, e.g. "小寨")
+                // 2. Thoroughfare only (e.g. "长安中路")
+                if let thr = thoroughfare {
+                    print("[Location] reverse geocode – thoroughfare: \(thr)")
+                    return thr
+                }
+
+                // 3. Sub-locality (neighborhood / 商圈, e.g. "小寨")
                 let subLocality = mk.subLocality.flatMap { $0.isEmpty ? nil : $0 }
                 if let sub = subLocality {
                     print("[Location] reverse geocode – subLocality: \(sub)")
                     return sub
-                }
-
-                // 3. Thoroughfare only (e.g. "长安中路")
-                if let thr = thoroughfare {
-                    print("[Location] reverse geocode – thoroughfare: \(thr)")
-                    return thr
                 }
 
                 // 4. Sub-administrative area + locality (e.g. "雁塔区 · 西安市")
