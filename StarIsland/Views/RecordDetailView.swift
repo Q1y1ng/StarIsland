@@ -107,6 +107,7 @@ struct RecordDetailView: View {
     @ViewBuilder
     private var imageSection: some View {
         if !record.imagePaths.isEmpty {
+            let _ = print("[RecordDetail] images: count=\(record.imagePaths.count) maxHeight=240")
             ImageGridView(imagePaths: record.imagePaths)
                 .frame(maxWidth: .infinity, maxHeight: 240)
         }

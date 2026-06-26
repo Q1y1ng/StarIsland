@@ -93,6 +93,7 @@ struct VoiceRecordButton: View {
             do {
                 try audioSession.setCategory(.record, mode: .default)
                 try audioSession.setActive(true)
+                print("[Voice] audioSession activated (category: record)")
 
                 let recorder = try AVAudioRecorder(url: url, settings: settings)
                 recorder.record()
@@ -101,24 +102,30 @@ struct VoiceRecordButton: View {
                     audioRecorder = recorder
                     recordingURL = url
                     phase = .recording
+                    print("[Voice] recording started: \(url.lastPathComponent)")
                 }
             } catch {
-                print("[Voice] recording setup failed:", error.localizedDescription)
+                let nsError = error as NSError
+                print("[Voice] recording setup failed: domain=\(nsError.domain) code=\(nsError.code) desc=\(nsError.localizedDescription) userInfo=\(nsError.userInfo)")
                 await MainActor.run { phase = .idle }
             }
         }
     }
 
     private func stopRecording() {
+        print("[Voice] stopRecording")
         audioRecorder?.stop()
         audioRecorder = nil
         phase = .processing
 
         guard let url = recordingURL else {
+            print("[Voice] stopRecording: no recording URL")
             phase = .idle
             return
         }
         recordingURL = nil
+
+        print("[Voice] transcribing: \(url.lastPathComponent)")
 
         Task {
             let text = await SpeechService.transcribe(audioURL: url)

@@ -72,7 +72,8 @@ enum SpeechService {
                     continuation.resume(returning: text)
                 } else if let error {
                     didResume = true
-                    print("[Speech] transcription error:", error.localizedDescription)
+                    let nsError = error as NSError
+                    print("[Speech] transcription error: domain=\(nsError.domain) code=\(nsError.code) desc=\(nsError.localizedDescription) userInfo=\(nsError.userInfo)")
                     continuation.resume(returning: nil)
                 }
             }

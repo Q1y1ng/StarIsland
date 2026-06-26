@@ -29,6 +29,19 @@ struct ImageGridView: View {
         let displayPaths = Array(imagePaths.prefix(maxDisplay))
         let overflow = imagePaths.count - maxDisplay
 
+        // 🩺 Diagnostics: log image count and selected layout
+        let _ = {
+            let tag: String
+            switch displayPaths.count {
+            case 1:  tag = "single(4:3)"
+            case 2:  tag = "double(1:1×2)"
+            case 3:  tag = "triple(16:9 + 1:1×2)"
+            case 4:  tag = "grid(2×2)"
+            default: tag = "grid(3×N)"
+            }
+            print("[ImageGrid] total=\(imagePaths.count) display=\(displayPaths.count) layout=\(tag) overflow=\(overflow)")
+        }()
+
         Group {
             switch displayPaths.count {
             case 1:  singleLayout(displayPaths)
@@ -168,6 +181,11 @@ private struct LocalImage: View {
     private func load() async {
         guard uiImage == nil else { return }
         let image = await ImageCacheService.shared.load(filename: filename)
+        if let image {
+            print("[ImageGrid] LocalImage loaded: \(filename) \(Int(image.size.width))×\(Int(image.size.height)) scale=\(image.scale)")
+        } else {
+            print("[ImageGrid] LocalImage nil: \(filename)")
+        }
         await MainActor.run { uiImage = image }
     }
 }
