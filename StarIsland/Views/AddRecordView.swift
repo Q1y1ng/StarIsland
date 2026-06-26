@@ -24,6 +24,7 @@ struct AddRecordView: View {
     @State private var text: String = ""
     @State private var selectedMood: Mood? = .neutral
     @State private var imagePaths: [String] = []
+    @State private var showingAddImageMenu = false
     @State private var showingCamera = false
     @State private var cameraImageData: Data?
     @State private var isSaving = false
@@ -114,6 +115,19 @@ struct AddRecordView: View {
                 maxSelectionCount: maxImages - imagePaths.count,
                 matching: .images
             )
+            .confirmationDialog(
+                "添加图片",
+                isPresented: $showingAddImageMenu,
+                titleVisibility: .visible
+            ) {
+                Button("拍照") {
+                    showingCamera = true
+                }
+                Button("从相册选择") {
+                    showingPhotoFallback = true
+                }
+                Button("取消", role: .cancel) { }
+            }
             .onChange(of: fallbackPhotoItems) { _, items in
                 loadFallbackPhotos(items)
             }
@@ -315,7 +329,7 @@ struct AddRecordView: View {
 
     private var addImageButton: some View {
         Button {
-            showImagePicker()
+            showingAddImageMenu = true
         } label: {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(.tertiary, lineWidth: 1)
