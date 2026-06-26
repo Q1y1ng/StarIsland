@@ -14,6 +14,9 @@ struct ImageGridView: View {
     let imagePaths: [String]
 
     var maxDisplay: Int = 9
+    /// When set, overrides the dynamic grid height.
+    /// Used by TimelineCell (160 pt) and RecordDetailView (maxHeight 320 pt).
+    var fixedHeight: CGFloat?
 
     // Hero transition support (optional)
     var heroNamespace: Namespace.ID?
@@ -22,11 +25,15 @@ struct ImageGridView: View {
 
     @State private var viewerIndex: Int?
     @State private var showViewer = false
+    @State private var scaleValues: [String: CGFloat] = [:]
+    @State private var opacities: [String: CGFloat] = [:]
 
     // MARK: - Body
 
-    /// Fixed height: 220 pt for single image, 240 pt for multiple.
+    /// Fixed height: 220 pt for single image, 240 pt for multiple,
+    /// unless `fixedHeight` is provided.
     private var gridHeight: CGFloat {
+        if let fixedHeight { return fixedHeight }
         let displayPaths = Array(imagePaths.prefix(maxDisplay))
         return displayPaths.count == 1 ? 220 : 240
     }
@@ -34,19 +41,6 @@ struct ImageGridView: View {
     var body: some View {
         let displayPaths = Array(imagePaths.prefix(maxDisplay))
         let overflow = imagePaths.count - maxDisplay
-
-        // 🩺 Diagnostics: log image count and selected layout
-        let _ = {
-            let tag: String
-            switch displayPaths.count {
-            case 1:  tag = "single(4:3)"
-            case 2:  tag = "double(1:1×2)"
-            case 3:  tag = "triple(16:9 + 1:1×2)"
-            case 4:  tag = "grid(2×2)"
-            default: tag = "grid(3×N)"
-            }
-            print("[ImageGrid] total=\(imagePaths.count) display=\(displayPaths.count) layout=\(tag) overflow=\(overflow)")
-        }()
 
         Group {
             switch displayPaths.count {
@@ -132,18 +126,27 @@ struct ImageGridView: View {
                                         style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius.image))
             .clipped()
+            .shadow(color: .black.opacity(0.1), radius: 12, x: 0, y: 4)
             .matchedGeometryEffectIfAvailable(
                 id: heroID,
                 in: heroNamespace,
                 isSource: heroFilename != filename
             )
             .opacity(isHero && heroFilename == filename ? 0 : 1)
+            .scaleEffect(scaleValues[filename] ?? 1)
+            .opacity(opacities[filename] ?? 1)
             .onTapGesture {
                 if let onTapImage {
                     onTapImage(imagePaths, index)
                 } else {
                     viewerIndex = index
                     showViewer = true
+                }
+            }
+            .onAppear {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    scaleValues[filename] = 1
+                    opacities[filename] = 1
                 }
             }
     }
