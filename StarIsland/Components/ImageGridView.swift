@@ -93,7 +93,8 @@ struct ImageGridView: View {
 
         return LocalImage(filename: filename)
             .scaledToFill()
-            .frame(maxWidth: .infinity, height: 250)
+            .frame(maxWidth: .infinity)
+            .frame(height: 250)
             .clipped()
             .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius.image,
                                         style: .continuous))
