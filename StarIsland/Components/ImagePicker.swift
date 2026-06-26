@@ -53,7 +53,10 @@ struct CameraPicker: UIViewControllerRepresentable {
 
             if let image = info[.originalImage] as? UIImage,
                let data = image.jpegData(compressionQuality: 0.8) {
+                print("[Camera] captured image: size=\(image.size.width)×\(image.size.height) data=\(data.count)B")
                 parent.imageData = data
+            } else {
+                print("[Camera] ❌ failed to extract image data from picker (image=\(info[.originalImage] != nil))")
             }
 
             // ⚠️  Do NOT call picker.dismiss() — SwiftUI controls
