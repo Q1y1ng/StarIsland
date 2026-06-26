@@ -25,6 +25,12 @@ struct ImageGridView: View {
 
     // MARK: - Body
 
+    /// Fixed height: 220 pt for single image, 240 pt for multiple.
+    private var gridHeight: CGFloat {
+        let displayPaths = Array(imagePaths.prefix(maxDisplay))
+        return displayPaths.count == 1 ? 220 : 240
+    }
+
     var body: some View {
         let displayPaths = Array(imagePaths.prefix(maxDisplay))
         let overflow = imagePaths.count - maxDisplay
@@ -51,6 +57,8 @@ struct ImageGridView: View {
             default: gridLayout(displayPaths, columns: 3, overflow: overflow)
             }
         }
+        .frame(height: gridHeight)
+        .clipped()
         .fullScreenCover(isPresented: $showViewer) {
             PhotoViewer(imagePaths: imagePaths,
                         initialIndex: viewerIndex ?? 0)
@@ -165,7 +173,6 @@ private struct LocalImage: View {
             if let image = uiImage {
                 Image(uiImage: image)
                     .resizable()
-                    .scaledToFill()
             } else {
                 Rectangle()
                     .fill(.quaternary)

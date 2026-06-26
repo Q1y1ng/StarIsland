@@ -177,10 +177,12 @@ struct AddRecordView: View {
         // ── Save ──────────────────────────────────────────────
         ToolbarItem(placement: .confirmationAction) {
             Button("保存") { saveRecord() }
-                .disabled(
-                    text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    || isSaving
-                )
+                .disabled({
+                    let noText = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    let noImages = imagePaths.isEmpty
+                    let noLocation = !(isLocationEnabled && (locationName != nil))
+                    return (noText && noImages && noLocation) || isSaving
+                }())
                 .fontWeight(.semibold)
         }
     }
@@ -303,7 +305,10 @@ struct AddRecordView: View {
 
     private func saveRecord() {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        let hasText = !trimmed.isEmpty
+        let hasImages = !imagePaths.isEmpty
+        let hasLocation = isLocationEnabled && locationName != nil
+        guard hasText || hasImages || hasLocation else { return }
 
         isSaving = true
 
