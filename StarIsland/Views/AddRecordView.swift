@@ -156,9 +156,11 @@ struct AddRecordView: View {
 
                 Button {
                     guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+                        print("[AddRecord] camera unavailable, falling back to photo picker")
                         showingPhotoFallback = true
                         return
                     }
+                    print("[AddRecord] presenting camera (existing images: \(imagePaths.count))")
                     showingCamera = true
                 } label: {
                     Image(systemName: "camera.fill")
@@ -253,10 +255,12 @@ struct AddRecordView: View {
     // MARK: - Fetch Location
 
     private func fetchLocation() {
+        print("[AddRecord] fetchLocation: start")
         isFetchingLocation = true
         Task {
             let result = await locationService.requestLocation()
             await MainActor.run {
+                print("[AddRecord] fetchLocation: done name=\(result.locationName ?? "nil") lat=\(result.latitude ?? -1) lng=\(result.longitude ?? -1)")
                 locationName = result.locationName
                 locationLatitude = result.latitude
                 locationLongitude = result.longitude
@@ -270,9 +274,11 @@ struct AddRecordView: View {
     private func handleCameraImage() {
         guard let data = cameraImageData,
               let filename = ImageStorageService.save(data) else {
+            print("[AddRecord] handleCameraImage: no data or save failed (data=\(cameraImageData != nil))")
             cameraImageData = nil
             return
         }
+        print("[AddRecord] camera image saved: \(filename) (\(data.count)B)")
         cameraImageData = nil
         imagePaths.append(filename)
     }
@@ -300,6 +306,8 @@ struct AddRecordView: View {
         guard !trimmed.isEmpty else { return }
 
         isSaving = true
+
+        print("[AddRecord] save: text=\(trimmed.prefix(50)) images=\(imagePaths.count) location=\(locationName ?? "nil") mood=\(selectedMood?.title ?? "nil")")
 
         let record = Record(
             text: trimmed,

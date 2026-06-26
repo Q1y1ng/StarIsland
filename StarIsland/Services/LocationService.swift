@@ -170,7 +170,8 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
         _: CLLocationManager,
         didFailWithError error: Error
     ) {
-        print("[Location] ❌ didFailWithError:", error.localizedDescription)
+        let nsError = error as NSError
+        print("[Location] ❌ didFailWithError: domain=\(nsError.domain) code=\(nsError.code) desc=\(nsError.localizedDescription) userInfo=\(nsError.userInfo)")
         continuation?.resume(returning: (nil, nil, nil))
         continuation = nil
     }
