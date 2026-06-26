@@ -335,7 +335,8 @@ struct LocationPickerView: View {
 
     /// Extract region from current camera position (avoids inline switch).
     private var currentRegion: MKCoordinateRegion? {
-        switch cameraPosition {
+        let pos = cameraPosition
+        switch pos {
         case .region(let region):
             return region
         default:
@@ -345,7 +346,8 @@ struct LocationPickerView: View {
 
     /// Extract center coordinate from current camera position.
     private var mapCenter: CLLocationCoordinate2D {
-        switch cameraPosition {
+        let pos = cameraPosition
+        switch pos {
         case .region(let region):
             return region.center
         default:
