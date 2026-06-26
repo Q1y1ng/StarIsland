@@ -8,6 +8,12 @@ import AVFoundation
 /// Tapping starts recording; tapping again stops, transcribes via
 /// ``SpeechService``, and calls `onTranscription` with the result.
 ///
+/// ## Permission flow
+/// 1. Microphone permission (`AVAudioSession.requestRecordPermission`)
+/// 2. Speech recognition permission (`SFSpeechRecognizer.requestAuthorization`)
+///
+/// If either is denied the button shows an alert guiding the user to Settings.
+///
 /// ## States
 /// - Idle           – mic icon, enabled
 /// - Recording      – red stop icon, pulsing animation
@@ -22,6 +28,7 @@ struct VoiceRecordButton: View {
     @State private var phase: Phase = .idle
     @State private var audioRecorder: AVAudioRecorder?
     @State private var recordingURL: URL?
+    @State private var showingPermissionAlert = false
 
     // MARK: - Body
 
@@ -38,6 +45,11 @@ struct VoiceRecordButton: View {
                 .foregroundStyle(micColor)
         }
         .disabled(phase == .processing)
+        .alert("需要权限", isPresented: $showingPermissionAlert) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text("请在设置中允许 StarIsland 使用麦克风和语音识别权限。")
+        }
     }
 
     private var micColor: Color {
@@ -54,8 +66,19 @@ struct VoiceRecordButton: View {
         let audioSession = AVAudioSession.sharedInstance()
 
         Task {
-            let granted = await requestMicrophonePermission()
-            guard granted else { return }
+            // ── 1. Microphone permission ──────────────────────
+            let micGranted = await requestMicrophonePermission()
+            guard micGranted else {
+                await MainActor.run { showingPermissionAlert = true }
+                return
+            }
+
+            // ── 2. Speech recognition permission ──────────────
+            let speechGranted = await SpeechService.requestAuthorization()
+            guard speechGranted else {
+                await MainActor.run { showingPermissionAlert = true }
+                return
+            }
 
             let url = FileManager.default.temporaryDirectory
                 .appendingPathComponent("recording_\(UUID().uuidString).m4a")
@@ -80,6 +103,7 @@ struct VoiceRecordButton: View {
                     phase = .recording
                 }
             } catch {
+                print("[Voice] recording setup failed:", error.localizedDescription)
                 await MainActor.run { phase = .idle }
             }
         }
@@ -102,6 +126,7 @@ struct VoiceRecordButton: View {
             await MainActor.run {
                 phase = .idle
                 if let text, !text.isEmpty {
+                    print("[Voice] transcription:", text.prefix(50))
                     onTranscription(text)
                 }
             }

@@ -108,7 +108,7 @@ struct RecordDetailView: View {
     private var imageSection: some View {
         if !record.imagePaths.isEmpty {
             ImageGridView(imagePaths: record.imagePaths)
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, maxHeight: 240)
         }
     }
 
