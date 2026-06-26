@@ -143,15 +143,64 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
         print("[Location] reverse geocode start")
 
         let geocoder = CLGeocoder()
-        geocoder.reverseGeocodeLocation(location) { [weak self] placemarks, _ in
+        geocoder.reverseGeocodeLocation(location) { [weak self] placemarks, error in
+            if let error {
+                let nsError = error as NSError
+                print("[Location] reverse geocode – error: domain=\(nsError.domain) code=\(nsError.code) desc=\(nsError.localizedDescription)")
+            }
+
             let name: String = {
                 guard let mk = placemarks?.first else {
-                    print("[Location] reverse geocode – no placemarks")
-                    return "未知地点"
+                    let lat = location.coordinate.latitude
+                    let lng = location.coordinate.longitude
+                    let fallback = String(format: "%.4f, %.4f", lat, lng)
+                    print("[Location] reverse geocode – no placemarks, fallback to coords: \(fallback)")
+                    return fallback
                 }
-                let result = mk.locality ?? mk.name ?? "未知地点"
-                print("[Location] reverse geocode – result:", result)
-                return result
+
+                // Priority-based location name resolution
+                // 1. POI / place name (most precise)
+                if let name = mk.name, !name.isEmpty {
+                    print("[Location] reverse geocode – name(POI): \(name)")
+                    return name
+                }
+
+                // 2. Sub-locality + thoroughfare (e.g. "小寨 · 长安中路")
+                let subLocality = mk.subLocality.flatMap { $0.isEmpty ? nil : $0 }
+                let thoroughfare = mk.thoroughfare.flatMap { $0.isEmpty ? nil : $0 }
+                if let sub = subLocality, let thr = thoroughfare {
+                    let result = "\(sub) · \(thr)"
+                    print("[Location] reverse geocode – subLocality+thoroughfare: \(result)")
+                    return result
+                }
+
+                // 3. Thoroughfare only (e.g. "长安中路")
+                if let thr = thoroughfare {
+                    print("[Location] reverse geocode – thoroughfare: \(thr)")
+                    return thr
+                }
+
+                // 4. Sub-administrative area + locality (e.g. "雁塔区 · 西安市")
+                let subAdmin = mk.subAdministrativeArea.flatMap { $0.isEmpty ? nil : $0 }
+                let locality = mk.locality.flatMap { $0.isEmpty ? nil : $0 }
+                if let sub = subAdmin, let loc = locality {
+                    let result = "\(sub) · \(loc)"
+                    print("[Location] reverse geocode – subAdmin+locality: \(result)")
+                    return result
+                }
+
+                // 5. Locality only (e.g. "西安市")
+                if let loc = locality {
+                    print("[Location] reverse geocode – locality: \(loc)")
+                    return loc
+                }
+
+                // 6. Fallback: coordinates
+                let lat = location.coordinate.latitude
+                let lng = location.coordinate.longitude
+                let fallback = String(format: "%.4f, %.4f", lat, lng)
+                print("[Location] reverse geocode – fallback to coords: \(fallback)")
+                return fallback
             }()
 
             let result: LocationResult = (
