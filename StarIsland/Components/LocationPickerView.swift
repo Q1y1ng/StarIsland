@@ -7,21 +7,9 @@ import CoreLocation
 /// A bottom sheet that lets the user pick a location via map drag (fixed pin),
 /// search, or current location.  Uses the iOS 17+ MapKit API (no UIKit).
 ///
-/// T4.7 — redesigned with a fixed center pin:
-/// ```
-/// ┌──────────────────────────────┐
-/// │  🔍 搜索地点                  │
-/// │                              │
-/// │         🗺️ Map              │
-/// │         📍 (fixed pin)       │
-/// │   drag map → pin stays still │
-/// │                              │
-/// │  📍 当前位置                   │
-/// │  长安中路89号 · 小寨 · 雁塔区   │
-/// │                              │
-/// │  [         确定              ]│
-/// └──────────────────────────────┘
-/// ```
+/// Single source of truth: `cameraPosition`.  Center coordinate is obtained
+/// exclusively through `onMapCameraChange { context.region.center }` — no
+/// pattern matching on `MapCameraPosition`.
 struct LocationPickerView: View {
     @Binding var selectedName: String?
     @Binding var selectedLatitude: Double?
@@ -331,30 +319,6 @@ struct LocationPickerView: View {
         }
     }
 
-    // MARK: - Computed Properties
-
-    /// Extract region from current camera position (avoids inline switch).
-    private var currentRegion: MKCoordinateRegion? {
-        let pos = cameraPosition
-        switch pos {
-        case .region(let region):
-            return region
-        default:
-            return nil
-        }
-    }
-
-    /// Extract center coordinate from current camera position.
-    private var mapCenter: CLLocationCoordinate2D {
-        let pos = cameraPosition
-        switch pos {
-        case .region(let region):
-            return region.center
-        default:
-            return CLLocationCoordinate2D(latitude: 34.3416, longitude: 108.9398)
-        }
-    }
-
     // MARK: - Actions
 
     private func fetchCurrentLocation() {
@@ -409,15 +373,11 @@ struct LocationPickerView: View {
         let request = MKLocalSearch.Request()
         request.naturalLanguageQuery = query
         request.resultTypes = [.pointOfInterest, .address]
-
-        if let region = currentRegion {
-            request.region = region
-        } else {
-            request.region = MKCoordinateRegion(
-                center: CLLocationCoordinate2D(latitude: 34.3416, longitude: 108.9398),
-                span: MKCoordinateSpan(latitudeDelta: 0.1, longitudeDelta: 0.1)
-            )
-        }
+        // Default region — centers on Xi'an metro area
+        request.region = MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: 34.3416, longitude: 108.9398),
+            span: MKCoordinateSpan(latitudeDelta: 0.2, longitudeDelta: 0.2)
+        )
 
         do {
             let search = MKLocalSearch(request: request)
@@ -435,7 +395,7 @@ struct LocationPickerView: View {
 
         let name = buildSelectedName(from: placemark)
         let coord = placemark.location?.coordinate
-            ?? extractCoordinate(from: cameraPosition)
+            ?? CLLocationCoordinate2D(latitude: 34.3416, longitude: 108.9398)
 
         selectedName = name
         selectedLatitude = coord.latitude
@@ -474,7 +434,7 @@ struct LocationPickerView: View {
         }
         // 7. Coordinates
         let coord = pm.location?.coordinate
-            ?? extractCoordinate(from: cameraPosition)
+            ?? CLLocationCoordinate2D(latitude: 34.3416, longitude: 108.9398)
         return String(format: "%.4f, %.4f", coord.latitude, coord.longitude)
     }
 
@@ -516,11 +476,6 @@ struct LocationPickerView: View {
             chips.append(("市", loc))
         }
         return chips
-    }
-
-    /// Extract center coordinate from MapCameraPosition.
-    private func extractCoordinate(from position: MapCameraPosition) -> CLLocationCoordinate2D {
-        mapCenter
     }
 }
 
