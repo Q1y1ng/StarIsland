@@ -536,6 +536,7 @@ private struct IconPickerView: View {
                 #endif
             }
         }
+    }
 
     private func iconDescription(_ key: String) -> String {
         switch key {
