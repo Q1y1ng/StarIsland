@@ -116,6 +116,21 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             2>&1 | tee build.log
 
+      - name: Dump Debug Info.plist
+        run: |
+          echo "===== Locating Debug StarIsland.app ====="
+          APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData \
+            -path "*/Build/Products/Debug-iphoneos/StarIsland.app" \
+            -type d 2>/dev/null | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "❌ Debug StarIsland.app not found"
+            exit 1
+          fi
+          echo "Found: $APP_PATH"
+          echo ""
+          echo "===== Info.plist Content ====="
+          plutil -p "$APP_PATH/Info.plist" 2>&1 | tee final-infoplist.txt
+
       - name: Verify AppIcon in Assets.car
         run: |
           echo "===== Locating Assets.car ====="
@@ -181,6 +196,14 @@ jobs:
         with:
           name: error-scan
           path: error-scan-debug.txt
+          retention-days: 30
+
+      - name: Upload Debug Info.plist Dump
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-infoplist-dump
+          path: final-infoplist.txt
           retention-days: 30
 
   # ── Job 2: Unsigned IPA — workflow_dispatch only ─────────────────────────
@@ -353,6 +376,15 @@ jobs:
           echo "===== Bundle Content ====="
           find "$APP_PATH" | head -100
           du -sh "$APP_PATH"
+
+      - name: Dump Release Info.plist
+        run: |
+          APP_PATH="${{ steps.locate-app.outputs.APP_PATH }}"
+          echo "===== Release StarIsland.app ====="
+          echo "$APP_PATH"
+          echo ""
+          echo "===== Info.plist Content ====="
+          plutil -p "$APP_PATH/Info.plist" 2>&1 | tee final-infoplist.txt
 
       - name: Verify Release AppIcon in Assets.car
         run: |
@@ -537,6 +569,14 @@ jobs:
         with:
           name: error-scan-release
           path: error-scan-release.txt
+          retention-days: 30
+
+      - name: Upload Release Info.plist Dump
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-infoplist-dump
+          path: final-infoplist.txt
           retention-days: 30
 
       - name: Upload Unsigned IPA
