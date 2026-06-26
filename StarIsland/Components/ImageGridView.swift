@@ -10,13 +10,21 @@ import SwiftUI
 ///
 /// **Standard mode** (no namespace): the grid presents ``PhotoViewer`` via
 /// its own `fullScreenCover` on tap.
+///
+/// ## T4.7 — Timeline layout modes
+/// - `fitSingleImage`: single image uses `.scaledToFit()` + `maxHeight: 300`
+/// - `useStrictGrid`: multi-image uses 110×110 square grid (2/2×2/3×3)
 struct ImageGridView: View {
     let imagePaths: [String]
 
     var maxDisplay: Int = 9
     /// When set, overrides the dynamic grid height.
-    /// Used by TimelineCell (160 pt) and RecordDetailView (maxHeight 320 pt).
+    /// Used by RecordDetailView for standard layout.
     var fixedHeight: CGFloat?
+
+    // T4.7 — Timeline layout modes
+    var fitSingleImage: Bool = false
+    var useStrictGrid: Bool = false
 
     // Hero transition support (optional)
     var heroNamespace: Namespace.ID?
@@ -39,27 +47,143 @@ struct ImageGridView: View {
     }
 
     var body: some View {
+        layoutContent
+            .fullScreenCover(isPresented: $showViewer) {
+                PhotoViewer(imagePaths: imagePaths,
+                            initialIndex: viewerIndex ?? 0)
+            }
+    }
+
+    // MARK: - Layout Content
+
+    @ViewBuilder
+    private var layoutContent: some View {
         let displayPaths = Array(imagePaths.prefix(maxDisplay))
         let overflow = imagePaths.count - maxDisplay
 
-        Group {
-            switch displayPaths.count {
-            case 1:  singleLayout(displayPaths)
-            case 2:  doubleLayout(displayPaths)
-            case 3:  tripleLayout(displayPaths)
-            case 4:  gridLayout(displayPaths, columns: 2)
-            default: gridLayout(displayPaths, columns: 3, overflow: overflow)
+        if fitSingleImage && displayPaths.count == 1 {
+            // T4.7 — Timeline single: scaledToFit, full width, maxHeight 300
+            singleFitLayout(displayPaths[0])
+        } else if useStrictGrid && displayPaths.count >= 2 {
+            // T4.7 — Timeline multi: 110×110 strict grid
+            strictGridLayout(displayPaths, overflow: overflow)
+                .frame(height: strictGridHeight(displayPaths.count))
+                .clipped()
+        } else {
+            // Standard layout
+            Group {
+                switch displayPaths.count {
+                case 1:  singleLayout(displayPaths)
+                case 2:  doubleLayout(displayPaths)
+                case 3:  tripleLayout(displayPaths)
+                case 4:  gridLayout(displayPaths, columns: 2)
+                default: gridLayout(displayPaths, columns: 3, overflow: overflow)
+                }
             }
-        }
-        .frame(height: gridHeight)
-        .clipped()
-        .fullScreenCover(isPresented: $showViewer) {
-            PhotoViewer(imagePaths: imagePaths,
-                        initialIndex: viewerIndex ?? 0)
+            .frame(height: gridHeight)
+            .clipped()
         }
     }
 
-    // MARK: - Layouts
+    // MARK: - T4.7 Timeline Single Image (scaledToFit)
+
+    private func singleFitLayout(_ filename: String) -> some View {
+        let heroID = "hero-image-\(filename)"
+        let isHero = heroNamespace != nil
+
+        return LocalImage(filename: filename)
+            .scaledToFill()
+            .frame(maxWidth: .infinity, height: 250)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius.image,
+                                        style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius.image))
+            .shadow(color: .black.opacity(0.1), radius: 12, x: 0, y: 4)
+            .matchedGeometryEffectIfAvailable(id: heroID, in: heroNamespace, isSource: heroFilename != filename)
+            .opacity(isHero && heroFilename == filename ? 0 : 1)
+            .scaleEffect(scaleValues[filename] ?? 1)
+            .opacity(opacities[filename] ?? 1)
+            .onTapGesture {
+                if let onTapImage {
+                    onTapImage(imagePaths, 0)
+                } else {
+                    viewerIndex = 0
+                    showViewer = true
+                }
+            }
+            .onAppear {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    scaleValues[filename] = 1
+                    opacities[filename] = 1
+                }
+            }
+    }
+
+    // MARK: - T4.7 Timeline Strict Grid (110×110 cells)
+
+    private func strictGridHeight(_ count: Int) -> CGFloat {
+        let columns = count <= 4 ? 2 : 3
+        let rows = (count + columns - 1) / columns
+        return CGFloat(rows) * 110 + CGFloat(rows - 1) * AppTheme.spacing.photoSpacing
+    }
+
+    private func strictGridLayout(_ paths: [String], overflow: Int) -> some View {
+        let columns = paths.count <= 4 ? 2 : 3
+        let rows = (paths.count + columns - 1) / columns
+
+        return VStack(spacing: AppTheme.spacing.photoSpacing) {
+            ForEach(0 ..< rows, id: \.self) { row in
+                HStack(spacing: AppTheme.spacing.photoSpacing) {
+                    ForEach(0 ..< columns, id: \.self) { col in
+                        let idx = row * columns + col
+                        if idx < paths.count {
+                            ZStack(alignment: .bottomTrailing) {
+                                strictThumb(paths[idx], index: idx)
+
+                                if idx == paths.count - 1 && overflow > 0 {
+                                    overflowBadge(overflow)
+                                }
+                            }
+                            .frame(width: 110, height: 110)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func strictThumb(_ filename: String, index: Int) -> some View {
+        let heroID = "hero-image-\(filename)"
+        let isHero = heroNamespace != nil
+
+        return LocalImage(filename: filename)
+            .scaledToFill()
+            .frame(width: 110, height: 110)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .contentShape(RoundedRectangle(cornerRadius: 12))
+            .shadow(color: .black.opacity(0.1), radius: 12, x: 0, y: 4)
+            .matchedGeometryEffectIfAvailable(id: heroID, in: heroNamespace, isSource: heroFilename != filename)
+            .opacity(isHero && heroFilename == filename ? 0 : 1)
+            .scaleEffect(scaleValues[filename] ?? 1)
+            .opacity(opacities[filename] ?? 1)
+            .onTapGesture {
+                if let onTapImage {
+                    onTapImage(imagePaths, index)
+                } else {
+                    viewerIndex = index
+                    showViewer = true
+                }
+            }
+            .onAppear {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    scaleValues[filename] = 1
+                    opacities[filename] = 1
+                }
+            }
+    }
+
+    // MARK: - Standard Layouts
 
     private func singleLayout(_ paths: [String]) -> some View {
         thumb(paths[0], aspectRatio: 4 / 3, index: 0)
