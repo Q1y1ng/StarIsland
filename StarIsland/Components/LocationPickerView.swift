@@ -331,6 +331,28 @@ struct LocationPickerView: View {
         }
     }
 
+    // MARK: - Computed Properties
+
+    /// Extract region from current camera position (avoids inline switch).
+    private var currentRegion: MKCoordinateRegion? {
+        switch cameraPosition {
+        case .region(let region):
+            return region
+        default:
+            return nil
+        }
+    }
+
+    /// Extract center coordinate from current camera position.
+    private var mapCenter: CLLocationCoordinate2D {
+        switch cameraPosition {
+        case .region(let region):
+            return region.center
+        default:
+            return CLLocationCoordinate2D(latitude: 34.3416, longitude: 108.9398)
+        }
+    }
+
     // MARK: - Actions
 
     private func fetchCurrentLocation() {
@@ -386,17 +408,14 @@ struct LocationPickerView: View {
         request.naturalLanguageQuery = query
         request.resultTypes = [.pointOfInterest, .address]
 
-        let cameraRegion: MKCoordinateRegion
-        switch cameraPosition {
-        case .region(let region):
-            cameraRegion = region
-        default:
-            cameraRegion = MKCoordinateRegion(
+        if let region = currentRegion {
+            request.region = region
+        } else {
+            request.region = MKCoordinateRegion(
                 center: CLLocationCoordinate2D(latitude: 34.3416, longitude: 108.9398),
                 span: MKCoordinateSpan(latitudeDelta: 0.1, longitudeDelta: 0.1)
             )
         }
-        request.region = cameraRegion
 
         do {
             let search = MKLocalSearch(request: request)
@@ -499,12 +518,7 @@ struct LocationPickerView: View {
 
     /// Extract center coordinate from MapCameraPosition.
     private func extractCoordinate(from position: MapCameraPosition) -> CLLocationCoordinate2D {
-        switch position {
-        case .region(let region):
-            return region.center
-        default:
-            return CLLocationCoordinate2D(latitude: 34.3416, longitude: 108.9398)
-        }
+        mapCenter
     }
 }
 
