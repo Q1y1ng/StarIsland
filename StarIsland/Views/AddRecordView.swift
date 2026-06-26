@@ -294,6 +294,7 @@ struct AddRecordView: View {
             .overlay(alignment: .topTrailing) {
                 // Delete button
                 Button {
+                    guard imagePaths.indices.contains(index) else { return }
                     withAnimation(.easeOut(duration: 0.2)) {
                         imagePaths.remove(at: index)
                     }
