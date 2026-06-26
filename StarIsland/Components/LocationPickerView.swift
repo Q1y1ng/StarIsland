@@ -386,7 +386,7 @@ struct LocationPickerView: View {
         request.naturalLanguageQuery = query
         request.resultTypes = [.pointOfInterest, .address]
 
-        if case .region(let region) = cameraPosition {
+        if case let .region(region) = cameraPosition {
             request.region = region
         } else {
             request.region = MKCoordinateRegion(
@@ -496,7 +496,7 @@ struct LocationPickerView: View {
 
     /// Extract center coordinate from MapCameraPosition.
     private func extractCoordinate(from position: MapCameraPosition) -> CLLocationCoordinate2D {
-        if case .region(let region) = position {
+        if case let .region(region) = position {
             return region.center
         }
         return CLLocationCoordinate2D(latitude: 34.3416, longitude: 108.9398)
