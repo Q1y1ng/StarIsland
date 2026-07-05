@@ -108,8 +108,8 @@ enum IntegrityService {
         return DatabaseHealth(
             totalRecords: records.count,
             recordsWithMissingImages: missingImageCount,
-            orphanedImages: orphanedImageCount,
             recordsWithMissingAudio: missingAudioCount,
+            orphanedImages: orphanedImageCount,
             orphanedAudio: orphanedAudioCount,
             duplicateSyncIds: dupCount,
             databaseSizeBytes: dbSize,
