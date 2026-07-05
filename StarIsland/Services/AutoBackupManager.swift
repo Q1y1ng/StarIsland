@@ -31,13 +31,8 @@ final class AutoBackupManager {
             self?.handleBackgroundTask(task as! BGProcessingTask)
         }
 
-        // Also do a quick check: if auto‑backup is enabled and today's backup
-        // hasn't been created yet, create it now (non‑blocking).
-        if SettingsStorage.autoBackupEnabled {
-            Task {
-                await runBackupIfNeeded()
-            }
-        }
+        // NOTE: Backup is handled by BGTaskScheduler — NOT at startup.
+        // Creating a ModelContainer here would race with SwiftUI's container.
 
         // Schedule the first recurring task
         scheduleNext()

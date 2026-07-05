@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 // MARK: - App Tab
 
@@ -43,6 +44,8 @@ enum AppTab: String, CaseIterable {
 /// - ``ArchiveView`` → ``TimelineView``: scroll to a specific date.
 /// - ``SearchView`` → ``MapView``: focus on a matching location.
 struct ContentView: View {
+    @Environment(\.modelContext) private var context
+
     @State private var selectedTab: AppTab = .timeline
     @State private var scrollToDate: Date? = nil
     @State private var focusLocation: String? = nil
@@ -117,6 +120,9 @@ struct ContentView: View {
         }
         .onAppear {
             LocationService.shared.requestPermission()
+        }
+        .task {
+            await IntegrityService.runAll(context: context)
         }
     }
 }
