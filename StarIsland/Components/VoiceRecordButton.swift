@@ -31,48 +31,62 @@ struct VoiceRecordButton: View {
 
     private let timer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 
+    private var durationText: String {
+        let total = Int(elapsedTime)
+        let minutes = total / 60
+        let seconds = total % 60
+        return String(format: "%02d:%02d", minutes, seconds)
+    }
+
     // MARK: - Body
 
     var body: some View {
-        switch phase {
-        case .idle:
-            Button(action: startRecording) {
-                Circle()
-                    .fill(Color(.systemGray6))
-                    .frame(width: 44, height: 44)
-                    .overlay {
-                        Image(systemName: "mic.fill")
-                            .font(.title2)
-                            .foregroundStyle(.primary)
-                    }
-            }
-
-        case .recording:
-            HStack(spacing: AppTheme.spacing.small) {
-                Circle()
-                    .fill(.red)
-                    .frame(width: 8, height: 8)
-
-                Text(elapsedTime.formatted(.time(pattern: .minuteSecond)))
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.red)
-                    .contentTransition(.numericText())
-                    .onReceive(timer) { _ in
-                        if let recorder = audioRecorder, recorder.isRecording {
-                            elapsedTime = recorder.currentTime
+        Group {
+            switch phase {
+            case .idle:
+                Button(action: startRecording) {
+                    Circle()
+                        .fill(Color(.systemGray6))
+                        .frame(width: 44, height: 44)
+                        .overlay {
+                            Image(systemName: "mic.fill")
+                                .font(.title2)
+                                .foregroundStyle(.primary)
                         }
-                    }
-
-                Button(action: stopRecording) {
-                    Image(systemName: "stop.fill")
-                        .font(.title2)
-                        .foregroundStyle(.red)
                 }
+
+            case .recording:
+                HStack(spacing: AppTheme.spacing.small) {
+                    Circle()
+                        .fill(.red)
+                        .frame(width: 8, height: 8)
+
+                    Text(durationText)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.red)
+                        .contentTransition(.numericText())
+                        .onReceive(timer) { _ in
+                            if let recorder = audioRecorder, recorder.isRecording {
+                                elapsedTime = recorder.currentTime
+                            }
+                        }
+
+                    Button(action: stopRecording) {
+                        Image(systemName: "stop.fill")
+                            .font(.title2)
+                            .foregroundStyle(.red)
+                    }
+                }
+                .padding(.horizontal, AppTheme.spacing.medium)
+                .padding(.vertical, AppTheme.spacing.small)
+                .background(Color(.systemGray6))
+                .clipShape(Capsule())
             }
-            .padding(.horizontal, AppTheme.spacing.medium)
-            .padding(.vertical, AppTheme.spacing.small)
-            .background(Color(.systemGray6))
-            .clipShape(Capsule())
+        }
+        .alert("需要麦克风权限", isPresented: $showingPermissionAlert) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text("请在设置中允许 StarIsland 使用麦克风权限。")
         }
     }
 
@@ -113,11 +127,6 @@ struct VoiceRecordButton: View {
             } catch {
                 await MainActor.run { phase = .idle }
             }
-        }
-        .alert("需要麦克风权限", isPresented: $showingPermissionAlert) {
-            Button("好", role: .cancel) {}
-        } message: {
-            Text("请在设置中允许 StarIsland 使用麦克风权限。")
         }
     }
 
