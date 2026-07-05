@@ -40,6 +40,44 @@ struct BackupRecord: Codable {
     let isTrashed: Bool
     let trashedAt: Date?
 
+    // MARK: - Init
+
+    init(
+        syncId: String,
+        syncVersion: Int,
+        timestamp: Date,
+        text: String,
+        mood: String?,
+        locationName: String?,
+        createdAt: Date,
+        updatedAt: Date,
+        imageFilenames: [String],
+        audioFilenames: [String],
+        latitude: Double?,
+        longitude: Double?,
+        weather: String?,
+        tags: [String],
+        isTrashed: Bool,
+        trashedAt: Date?
+    ) {
+        self.syncId = syncId
+        self.syncVersion = syncVersion
+        self.timestamp = timestamp
+        self.text = text
+        self.mood = mood
+        self.locationName = locationName
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.imageFilenames = imageFilenames
+        self.audioFilenames = audioFilenames
+        self.latitude = latitude
+        self.longitude = longitude
+        self.weather = weather
+        self.tags = tags
+        self.isTrashed = isTrashed
+        self.trashedAt = trashedAt
+    }
+
     // MARK: - Codable (backward‑compatible with old backups without audioFilenames)
 
     enum CodingKeys: String, CodingKey {
