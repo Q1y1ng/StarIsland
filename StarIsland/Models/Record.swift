@@ -43,6 +43,12 @@ final class Record {
     /// The moment the record was trashed, or `nil` if still active.
     var trashedAt: Date?
 
+    // MARK: - Phase 4.8 (Voice Notes)
+
+    /// Filenames of recorded audio clips (`.m4a`) stored via ``AudioStorageService``.
+    /// Multiple recordings are supported per record.
+    var audioPaths: [String] = []
+
     // MARK: - Phase 4 (Sync)
 
     /// Stable identifier used for deduplication during cross‑device sync and
@@ -66,7 +72,8 @@ final class Record {
         longitude: Double? = nil,
         weather: String? = nil,
         tags: [String] = [],
-        imagePaths: [String] = []
+        imagePaths: [String] = [],
+        audioPaths: [String] = []
     ) {
         let now = Date()
 
@@ -79,6 +86,7 @@ final class Record {
         self.createdAt = now
         self.updatedAt = now
         self.imagePaths = imagePaths
+        self.audioPaths = audioPaths
         self.latitude = latitude
         self.longitude = longitude
         self.weather = weather

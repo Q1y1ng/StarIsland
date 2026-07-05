@@ -3,79 +3,85 @@ import AVFoundation
 
 // MARK: - Voice Record Button
 
-/// Minimal‑viable‑product voice recording button.
+/// Persistent audio recording button.
 ///
-/// Tapping starts recording; tapping again stops, transcribes via
-/// ``SpeechService``, and calls `onTranscription` with the result.
-///
-/// ## Permission flow
-/// 1. Microphone permission (`AVAudioSession.requestRecordPermission`)
-/// 2. Speech recognition permission (`SFSpeechRecognizer.requestAuthorization`)
-///
-/// If either is denied the button shows an alert guiding the user to Settings.
+/// Records AAC (.m4a) to a temporary file, saves a copy via
+/// ``AudioStorageService``, then calls `onRecordingComplete` with the
+/// permanent filename.
 ///
 /// ## States
-/// - Idle           – mic icon, enabled
-/// - Recording      – red stop icon, pulsing animation
-/// - Processing     – mic icon, disabled (transcribing)
+/// - **Idle** – circular mic icon, tap to start recording
+/// - **Recording** – red dot + elapsed time (`MM:SS`) + stop button
 ///
-/// ## Requirements
-/// - `NSMicrophoneUsageDescription` in Info.plist
-/// - `NSSpeechRecognitionUsageDescription` in Info.plist
+/// The recording is **not** automatically transcribed.  Transcription is
+/// triggered later by the user via the **转文字** button on each audio item.
+///
+/// ## Permission
+/// Only `NSMicrophoneUsageDescription` is required.  Speech recognition
+/// permission is requested by ``AudioPlayButton`` when the user taps
+/// **转文字**.
 struct VoiceRecordButton: View {
-    let onTranscription: (String) -> Void
+    let onRecordingComplete: (String) -> Void
 
     @State private var phase: Phase = .idle
     @State private var audioRecorder: AVAudioRecorder?
     @State private var recordingURL: URL?
+    @State private var elapsedTime: TimeInterval = 0
     @State private var showingPermissionAlert = false
+
+    private let timer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 
     // MARK: - Body
 
     var body: some View {
-        Button {
-            switch phase {
-            case .idle:       startRecording()
-            case .recording:  stopRecording()
-            case .processing: break
-            }
-        } label: {
-            Image(systemName: phase == .recording ? "stop.circle.fill" : "mic.fill")
-                .font(.title3)
-                .foregroundStyle(micColor)
-        }
-        .disabled(phase == .processing)
-        .alert("需要权限", isPresented: $showingPermissionAlert) {
-            Button("好", role: .cancel) {}
-        } message: {
-            Text("请在设置中允许 StarIsland 使用麦克风和语音识别权限。")
-        }
-    }
-
-    private var micColor: Color {
         switch phase {
-        case .idle:      return .primary
-        case .recording: return .red
-        case .processing: return .secondary
+        case .idle:
+            Button(action: startRecording) {
+                Circle()
+                    .fill(Color(.systemGray6))
+                    .frame(width: 44, height: 44)
+                    .overlay {
+                        Image(systemName: "mic.fill")
+                            .font(.title2)
+                            .foregroundStyle(.primary)
+                    }
+            }
+
+        case .recording:
+            HStack(spacing: AppTheme.spacing.small) {
+                Circle()
+                    .fill(.red)
+                    .frame(width: 8, height: 8)
+
+                Text(elapsedTime.formatted(.time(pattern: .minuteSecond)))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.red)
+                    .contentTransition(.numericText())
+                    .onReceive(timer) { _ in
+                        if let recorder = audioRecorder, recorder.isRecording {
+                            elapsedTime = recorder.currentTime
+                        }
+                    }
+
+                Button(action: stopRecording) {
+                    Image(systemName: "stop.fill")
+                        .font(.title2)
+                        .foregroundStyle(.red)
+                }
+            }
+            .padding(.horizontal, AppTheme.spacing.medium)
+            .padding(.vertical, AppTheme.spacing.small)
+            .background(Color(.systemGray6))
+            .clipShape(Capsule())
         }
     }
 
     // MARK: - Recording
 
     private func startRecording() {
-        let audioSession = AVAudioSession.sharedInstance()
-
         Task {
-            // ── 1. Microphone permission ──────────────────────
             let micGranted = await requestMicrophonePermission()
             guard micGranted else {
-                await MainActor.run { showingPermissionAlert = true }
-                return
-            }
-
-            // ── 2. Speech recognition permission ──────────────
-            let speechGranted = await SpeechService.requestAuthorization()
-            guard speechGranted else {
                 await MainActor.run { showingPermissionAlert = true }
                 return
             }
@@ -91,9 +97,9 @@ struct VoiceRecordButton: View {
             ]
 
             do {
-                try audioSession.setCategory(.record, mode: .default)
-                try audioSession.setActive(true)
-                print("[Voice] audioSession activated (category: record)")
+                let session = AVAudioSession.sharedInstance()
+                try session.setCategory(.record, mode: .default)
+                try session.setActive(true)
 
                 let recorder = try AVAudioRecorder(url: url, settings: settings)
                 recorder.record()
@@ -101,41 +107,44 @@ struct VoiceRecordButton: View {
                 await MainActor.run {
                     audioRecorder = recorder
                     recordingURL = url
+                    elapsedTime = 0
                     phase = .recording
-                    print("[Voice] recording started: \(url.lastPathComponent)")
                 }
             } catch {
-                let nsError = error as NSError
-                print("[Voice] recording setup failed: domain=\(nsError.domain) code=\(nsError.code) desc=\(nsError.localizedDescription) userInfo=\(nsError.userInfo)")
                 await MainActor.run { phase = .idle }
             }
+        }
+        .alert("需要麦克风权限", isPresented: $showingPermissionAlert) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text("请在设置中允许 StarIsland 使用麦克风权限。")
         }
     }
 
     private func stopRecording() {
-        print("[Voice] stopRecording")
         audioRecorder?.stop()
         audioRecorder = nil
-        phase = .processing
 
         guard let url = recordingURL else {
-            print("[Voice] stopRecording: no recording URL")
             phase = .idle
             return
         }
         recordingURL = nil
 
-        print("[Voice] transcribing: \(url.lastPathComponent)")
-
         Task {
-            let text = await SpeechService.transcribe(audioURL: url)
+            guard let data = try? Data(contentsOf: url),
+                  let filename = AudioStorageService.save(data)
+            else {
+                try? FileManager.default.removeItem(at: url)
+                await MainActor.run { phase = .idle }
+                return
+            }
+
             try? FileManager.default.removeItem(at: url)
+
             await MainActor.run {
                 phase = .idle
-                if let text, !text.isEmpty {
-                    print("[Voice] transcription:", text.prefix(50))
-                    onTranscription(text)
-                }
+                onRecordingComplete(filename)
             }
         }
     }
@@ -145,18 +154,15 @@ struct VoiceRecordButton: View {
     private func requestMicrophonePermission() async -> Bool {
         let session = AVAudioSession.sharedInstance()
         switch session.recordPermission {
-        case .granted:
-            return true
-        case .denied:
-            return false
+        case .granted:    return true
+        case .denied:     return false
         case .undetermined:
             return await withCheckedContinuation { continuation in
                 session.requestRecordPermission { granted in
                     continuation.resume(returning: granted)
                 }
             }
-        @unknown default:
-            return false
+        @unknown default: return false
         }
     }
 
@@ -165,12 +171,11 @@ struct VoiceRecordButton: View {
     private enum Phase {
         case idle
         case recording
-        case processing
     }
 }
 
 // MARK: - Preview
 
 #Preview {
-    VoiceRecordButton(onTranscription: { print($0) })
+    VoiceRecordButton(onRecordingComplete: { print($0) })
 }

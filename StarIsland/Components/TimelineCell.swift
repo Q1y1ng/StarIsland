@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 
 // MARK: - Timeline Cell
 
@@ -92,6 +93,7 @@ struct TimelineCell: View {
         VStack(alignment: .leading, spacing: AppTheme.spacing.small) {
             headerView
             textContent
+            audioIndicator
             imagePreview
         }
     }
@@ -122,6 +124,27 @@ struct TimelineCell: View {
             .font(.body)
             .lineLimit(2)
             .lineSpacing(AppTheme.spacing.xsmall)
+    }
+
+    // MARK: - Audio Indicator
+
+    @ViewBuilder
+    private var audioIndicator: some View {
+        if !record.audioPaths.isEmpty {
+            HStack(spacing: AppTheme.spacing.xsmall) {
+                Image(systemName: "waveform")
+                    .font(.caption2)
+
+                if record.audioPaths.count == 1 {
+                    AudioDurationLabel(audioPath: record.audioPaths[0])
+                } else {
+                    Text("\(record.audioPaths.count) 条录音")
+                        .font(.caption)
+                }
+            }
+            .foregroundStyle(.tertiary)
+            .padding(.top, AppTheme.spacing.xxsmall)
+        }
     }
 
     // MARK: - Image Preview
@@ -163,4 +186,37 @@ struct TimelineCell: View {
     )
     TimelineCell(record: record, isLast: true)
         .padding(.vertical)
+}
+
+// MARK: - Audio Duration Label
+
+/// Loads and displays the duration of a single audio file.
+private struct AudioDurationLabel: View {
+    let audioPath: String
+    @State private var duration: TimeInterval?
+
+    var body: some View {
+        Group {
+            if let duration {
+                Text("🎵 \(formatDuration(duration))")
+            } else {
+                Text("🎵 --:--")
+            }
+        }
+        .font(.caption)
+        .task(priority: .low) {
+            let url = AudioStorageService.url(for: audioPath)
+            let asset = AVURLAsset(url: url)
+            if let seconds = try? await asset.load(.duration).seconds {
+                await MainActor.run { duration = seconds }
+            }
+        }
+    }
+
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        guard seconds.isFinite, seconds > 0 else { return "--:--" }
+        let m = Int(seconds) / 60
+        let s = Int(seconds) % 60
+        return String(format: "%02d:%02d", m, s)
+    }
 }

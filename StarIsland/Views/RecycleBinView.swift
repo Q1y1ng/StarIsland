@@ -171,6 +171,17 @@ struct RecycleBinView: View {
                 }
                 .foregroundStyle(.tertiary)
             }
+
+            // Audio count indicator
+            if !record.audioPaths.isEmpty {
+                HStack(spacing: 2) {
+                    Image(systemName: "waveform")
+                        .font(.caption2)
+                    Text("\(record.audioPaths.count)")
+                        .font(.caption2)
+                }
+                .foregroundStyle(.tertiary)
+            }
         }
         .padding(.vertical, AppTheme.spacing.xxsmall)
         .contentShape(Rectangle())
@@ -264,6 +275,7 @@ struct RecycleBinView: View {
 
     private func permanentlyDelete(_ record: Record) {
         ImageStorageService.delete(record.imagePaths)
+        AudioStorageService.delete(record.audioPaths)
         modelContext.delete(record)
         try? modelContext.save()
     }
@@ -280,6 +292,7 @@ struct RecycleBinView: View {
     private func emptyAll() {
         for record in trashedRecords {
             ImageStorageService.delete(record.imagePaths)
+            AudioStorageService.delete(record.audioPaths)
             modelContext.delete(record)
         }
         try? modelContext.save()
@@ -300,6 +313,7 @@ struct RecycleBinView: View {
         let selected = trashedRecords.filter { selectedIDs.contains($0.id) }
         for record in selected {
             ImageStorageService.delete(record.imagePaths)
+            AudioStorageService.delete(record.audioPaths)
             modelContext.delete(record)
         }
         selectedIDs.removeAll()

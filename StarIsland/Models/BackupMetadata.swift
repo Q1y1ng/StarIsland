@@ -32,12 +32,61 @@ struct BackupRecord: Codable {
     let createdAt: Date
     let updatedAt: Date
     let imageFilenames: [String]
+    let audioFilenames: [String]
     let latitude: Double?
     let longitude: Double?
     let weather: String?
     let tags: [String]
     let isTrashed: Bool
     let trashedAt: Date?
+
+    // MARK: - Codable (backward‑compatible with old backups without audioFilenames)
+
+    enum CodingKeys: String, CodingKey {
+        case syncId, syncVersion, timestamp, text, mood, locationName
+        case createdAt, updatedAt, imageFilenames, audioFilenames
+        case latitude, longitude, weather, tags, isTrashed, trashedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        syncId = try container.decode(String.self, forKey: .syncId)
+        syncVersion = try container.decode(Int.self, forKey: .syncVersion)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        text = try container.decode(String.self, forKey: .text)
+        mood = try container.decodeIfPresent(String.self, forKey: .mood)
+        locationName = try container.decodeIfPresent(String.self, forKey: .locationName)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        imageFilenames = try container.decode([String].self, forKey: .imageFilenames)
+        audioFilenames = try container.decodeIfPresent([String].self, forKey: .audioFilenames) ?? []
+        latitude = try container.decodeIfPresent(Double.self, forKey: .latitude)
+        longitude = try container.decodeIfPresent(Double.self, forKey: .longitude)
+        weather = try container.decodeIfPresent(String.self, forKey: .weather)
+        tags = try container.decode([String].self, forKey: .tags)
+        isTrashed = try container.decode(Bool.self, forKey: .isTrashed)
+        trashedAt = try container.decodeIfPresent(Date.self, forKey: .trashedAt)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(syncId, forKey: .syncId)
+        try container.encode(syncVersion, forKey: .syncVersion)
+        try container.encode(timestamp, forKey: .timestamp)
+        try container.encode(text, forKey: .text)
+        try container.encodeIfPresent(mood, forKey: .mood)
+        try container.encodeIfPresent(locationName, forKey: .locationName)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(imageFilenames, forKey: .imageFilenames)
+        try container.encode(audioFilenames, forKey: .audioFilenames)
+        try container.encodeIfPresent(latitude, forKey: .latitude)
+        try container.encodeIfPresent(longitude, forKey: .longitude)
+        try container.encodeIfPresent(weather, forKey: .weather)
+        try container.encode(tags, forKey: .tags)
+        try container.encode(isTrashed, forKey: .isTrashed)
+        try container.encodeIfPresent(trashedAt, forKey: .trashedAt)
+    }
 }
 
 // MARK: - Manifest

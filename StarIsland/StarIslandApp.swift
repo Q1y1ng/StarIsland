@@ -6,6 +6,7 @@ struct StarIslandApp: App {
     /// Ensures the images directory exists and runs startup checks.
     init() {
         _ = ImageStorageService.imagesDir
+        _ = AudioStorageService.audioDir
 
         // Registers background task handler and checks for today's backup.
         AutoBackupManager.shared.setup()

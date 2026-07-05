@@ -35,11 +35,33 @@ final class RecordViewModel: ObservableObject {
         }
     }
 
+    /// Remove audio files that are no longer referenced by any record.
+    func cleanOrphanedAudio(context: ModelContext) {
+        let allPaths = getAllAudioPaths(context: context)
+        let referenced = Set(allPaths)
+
+        let fileManager = FileManager.default
+        let audioDir = AudioStorageService.audioDir
+
+        guard let files = try? fileManager.contentsOfDirectory(atPath: audioDir.path)
+        else { return }
+
+        for file in files where !referenced.contains(file) {
+            AudioStorageService.delete(file)
+        }
+    }
+
     // MARK: - Helpers
 
     private func getAllImagePaths(context: ModelContext) -> [String] {
         let descriptor = FetchDescriptor<Record>()
         guard let records = try? context.fetch(descriptor) else { return [] }
         return records.flatMap(\.imagePaths)
+    }
+
+    private func getAllAudioPaths(context: ModelContext) -> [String] {
+        let descriptor = FetchDescriptor<Record>()
+        guard let records = try? context.fetch(descriptor) else { return [] }
+        return records.flatMap(\.audioPaths)
     }
 }

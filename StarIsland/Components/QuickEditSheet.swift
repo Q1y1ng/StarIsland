@@ -21,12 +21,14 @@ struct QuickEditSheet: View {
     @State private var text: String
     @State private var selectedMood: Mood?
     @State private var imagePaths: [String]
+    @State private var audioPaths: [String]
 
     init(record: Record) {
         self.record = record
         _text = State(initialValue: record.text)
         _selectedMood = State(initialValue: record.mood)
         _imagePaths = State(initialValue: record.imagePaths)
+        _audioPaths = State(initialValue: record.audioPaths)
     }
 
     private let maxImages = 9
@@ -44,6 +46,20 @@ struct QuickEditSheet: View {
                 // ── Image strip ────────────────────────────────────
                 if !imagePaths.isEmpty {
                     imageStrip
+                    Divider()
+                }
+
+                // ── Audio indicator ────────────────────────────────
+                if !audioPaths.isEmpty {
+                    HStack(spacing: AppTheme.spacing.small) {
+                        Image(systemName: "waveform")
+                            .font(.caption)
+                        Text("\(audioPaths.count) 条录音")
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, AppTheme.spacing.xlarge)
+                    .padding(.bottom, AppTheme.spacing.small)
                     Divider()
                 }
 
@@ -132,6 +148,7 @@ struct QuickEditSheet: View {
         record.text = trimmed
         record.mood = selectedMood
         record.imagePaths = imagePaths
+        record.audioPaths = audioPaths
         record.updatedAt = Date()
 
         try? modelContext.save()

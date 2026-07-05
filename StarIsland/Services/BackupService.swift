@@ -84,6 +84,21 @@ enum BackupService {
             }
         }
 
+        // audio/
+        let audioExportDir = tmpDir.appendingPathComponent("audio", isDirectory: true)
+        try FileManager.default.createDirectory(at: audioExportDir,
+                                                 withIntermediateDirectories: true)
+
+        for record in records {
+            for filename in record.audioPaths {
+                let src = AudioStorageService.url(for: filename)
+                let dst = audioExportDir.appendingPathComponent(filename)
+                if FileManager.default.fileExists(atPath: src.path) {
+                    try FileManager.default.copyItem(at: src, to: dst)
+                }
+            }
+        }
+
         // Create zip
         let dateStr = DateFormatterManager.shared.fullDateTime(from: Date())
             .replacingOccurrences(of: " ", with: "")
@@ -146,8 +161,9 @@ enum BackupService {
         let existingRecords = try context.fetch(existingDescriptor)
         let existingSyncIds = Set(existingRecords.compactMap { $0.syncId?.uuidString.lowercased() })
 
-        // Images directory
+        // Images / Audio directories
         let imagesDir = tmpDir.appendingPathComponent("images", isDirectory: true)
+        let audioDir = tmpDir.appendingPathComponent("audio", isDirectory: true)
 
         var newCount = 0
         var skipCount = 0
@@ -166,11 +182,21 @@ enum BackupService {
             for filename in backupRecord.imageFilenames {
                 let src = imagesDir.appendingPathComponent(filename)
                 guard FileManager.default.fileExists(atPath: src.path) else { continue }
-                // Use ImageStorageService to save with a new unique filename
                 let data = try Data(contentsOf: src)
                 if let savedName = ImageStorageService.save(data) {
                     newImagePaths.append(savedName)
                     photoCount += 1
+                }
+            }
+
+            // Copy audio
+            var newAudioPaths: [String] = []
+            for filename in backupRecord.audioFilenames {
+                let src = audioDir.appendingPathComponent(filename)
+                guard FileManager.default.fileExists(atPath: src.path) else { continue }
+                let data = try Data(contentsOf: src)
+                if let savedName = AudioStorageService.save(data) {
+                    newAudioPaths.append(savedName)
                 }
             }
 
@@ -183,7 +209,8 @@ enum BackupService {
                 longitude: backupRecord.longitude,
                 weather: backupRecord.weather,
                 tags: backupRecord.tags,
-                imagePaths: newImagePaths
+                imagePaths: newImagePaths,
+                audioPaths: newAudioPaths
             )
 
             // Restore original metadata
@@ -324,6 +351,7 @@ private extension Record {
             createdAt: createdAt,
             updatedAt: updatedAt,
             imageFilenames: imagePaths,
+            audioFilenames: audioPaths,
             latitude: latitude,
             longitude: longitude,
             weather: weather,

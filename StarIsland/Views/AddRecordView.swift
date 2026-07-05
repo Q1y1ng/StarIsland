@@ -24,6 +24,7 @@ struct AddRecordView: View {
     @State private var text: String = ""
     @State private var selectedMood: Mood? = .neutral
     @State private var imagePaths: [String] = []
+    @State private var audioPaths: [String] = []
     @State private var showingAddImageMenu = false
     @State private var showingCamera = false
     @State private var cameraImageData: Data?
@@ -79,15 +80,15 @@ struct AddRecordView: View {
                     Divider()
                         .padding(.horizontal, AppTheme.spacing.xlarge)
 
-                    // ── Bottom: images + voice ─────────────────────
+                    // ── Bottom: images + audio ──────────────────────
                     VStack(alignment: .leading, spacing: AppTheme.spacing.medium) {
                         // Image strip
                         if !imagePaths.isEmpty || imagePaths.count < maxImages {
                             imageStrip
                         }
 
-                        // Voice button
-                        voiceSection
+                        // Audio strip
+                        audioStrip
                     }
                     .padding(.vertical, AppTheme.spacing.medium)
                 }
@@ -359,25 +360,39 @@ struct AddRecordView: View {
         }
     }
 
-    // MARK: - Voice Section
+    // MARK: - Audio Strip
 
-    private var voiceSection: some View {
-        HStack(spacing: AppTheme.spacing.medium) {
-            VoiceRecordButton { transcription in
-                if text.isEmpty {
-                    text = transcription
-                } else {
-                    text = text + "\n" + transcription
+    private var audioStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: AppTheme.spacing.medium) {
+                // Existing audio items
+                ForEach(audioPaths.indices, id: \.self) { idx in
+                    AudioPlayButton(
+                        audioPath: audioPaths[idx],
+                        onDelete: {
+                            AudioStorageService.delete(audioPaths[idx])
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                audioPaths.remove(at: idx)
+                            }
+                        }
+                    )
+                    .frame(width: 200)
+                    .padding(.horizontal, AppTheme.spacing.medium)
+                    .padding(.vertical, AppTheme.spacing.small)
+                    .background(Color(.systemGray6))
+                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius.medium))
+                }
+
+                // Record new audio
+                VoiceRecordButton { filename in
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
+                        audioPaths.append(filename)
+                    }
                 }
             }
-
-            Text("语音记录")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-
-            Spacer()
+            .padding(.horizontal, AppTheme.spacing.xlarge)
         }
-        .padding(.horizontal, AppTheme.spacing.xlarge)
+        .frame(height: 60)
     }
 
     // MARK: - Toolbar
@@ -387,6 +402,7 @@ struct AddRecordView: View {
         ToolbarItem(placement: .cancellationAction) {
             Button("取消") {
                 ImageStorageService.delete(imagePaths)
+                AudioStorageService.delete(audioPaths)
                 dismiss()
             }
         }
@@ -494,7 +510,7 @@ struct AddRecordView: View {
 
         isSaving = true
 
-        print("[AddRecord] save: text=\(trimmed.prefix(50)) images=\(imagePaths.count) location=\(locationName ?? "nil") mood=\(selectedMood?.title ?? "nil")")
+        print("[AddRecord] save: text=\(trimmed.prefix(50)) images=\(imagePaths.count) audio=\(audioPaths.count) location=\(locationName ?? "nil") mood=\(selectedMood?.title ?? "nil")")
 
         let record = Record(
             text: trimmed,
@@ -502,7 +518,8 @@ struct AddRecordView: View {
             locationName: isLocationEnabled ? (locationName ?? "未知地点") : nil,
             latitude: isLocationEnabled ? locationLatitude : nil,
             longitude: isLocationEnabled ? locationLongitude : nil,
-            imagePaths: imagePaths
+            imagePaths: imagePaths,
+            audioPaths: audioPaths
         )
 
         modelContext.insert(record)

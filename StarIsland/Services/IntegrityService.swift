@@ -9,17 +9,25 @@ struct DatabaseHealth: Sendable {
     let totalRecords: Int
     /// Records whose referenced image files are missing from disk
     let recordsWithMissingImages: Int
+    /// Records whose referenced audio files are missing from disk
+    let recordsWithMissingAudio: Int
     /// Image files on disk that no record references
     let orphanedImages: Int
+    /// Audio files on disk that no record references
+    let orphanedAudio: Int
     /// Records sharing the same `syncId` (always 0 after auto‑repair)
     let duplicateSyncIds: Int
     /// Estimated database file size in bytes
     let databaseSizeBytes: Int64
     /// Total size of all image files in bytes
     let imagesSizeBytes: Int64
+    /// Total size of all audio files in bytes
+    let audioSizeBytes: Int64
 
     var isHealthy: Bool {
-        recordsWithMissingImages == 0 && orphanedImages == 0 && duplicateSyncIds == 0
+        recordsWithMissingImages == 0 && orphanedImages == 0
+        && recordsWithMissingAudio == 0 && orphanedAudio == 0
+        && duplicateSyncIds == 0
     }
 }
 
@@ -36,7 +44,9 @@ enum IntegrityService {
     static func runAll(context: ModelContext) async {
         await withTaskGroup(of: Void.self) { group in
             group.addTask { await checkOrphanedImages(context: context) }
+            group.addTask { await checkOrphanedAudio(context: context) }
             group.addTask { await checkMissingImages(context: context) }
+            group.addTask { await checkMissingAudio(context: context) }
             group.addTask { await fixDuplicateSyncIds(context: context) }
         }
     }
@@ -49,21 +59,40 @@ enum IntegrityService {
 
         // ── Missing images ──────────────────────────────────────────
         let fm = FileManager.default
-        var missingCount = 0
+        var missingImageCount = 0
         for record in records {
             for path in record.imagePaths {
                 let url = ImageStorageService.url(for: path)
-                if !fm.fileExists(atPath: url.path) { missingCount += 1 }
+                if !fm.fileExists(atPath: url.path) { missingImageCount += 1 }
+            }
+        }
+
+        // ── Missing audio ───────────────────────────────────────────
+        var missingAudioCount = 0
+        for record in records {
+            for path in record.audioPaths {
+                let url = AudioStorageService.url(for: path)
+                if !fm.fileExists(atPath: url.path) { missingAudioCount += 1 }
             }
         }
 
         // ── Orphaned images ─────────────────────────────────────────
-        let referenced = Set(records.flatMap(\.imagePaths))
+        let referencedImages = Set(records.flatMap(\.imagePaths))
         let imagesDir = ImageStorageService.imagesDir
-        var orphanedCount = 0
+        var orphanedImageCount = 0
         if let files = try? fm.contentsOfDirectory(atPath: imagesDir.path) {
-            for file in files where !referenced.contains(file) {
-                orphanedCount += 1
+            for file in files where !referencedImages.contains(file) {
+                orphanedImageCount += 1
+            }
+        }
+
+        // ── Orphaned audio ──────────────────────────────────────────
+        let referencedAudio = Set(records.flatMap(\.audioPaths))
+        let audioDir = AudioStorageService.audioDir
+        var orphanedAudioCount = 0
+        if let files = try? fm.contentsOfDirectory(atPath: audioDir.path) {
+            for file in files where !referencedAudio.contains(file) {
+                orphanedAudioCount += 1
             }
         }
 
@@ -74,14 +103,18 @@ enum IntegrityService {
         // ── File sizes ──────────────────────────────────────────────
         let dbSize = databaseFileSize()
         let imagesSize = directorySize(imagesDir)
+        let audioSize = directorySize(audioDir)
 
         return DatabaseHealth(
             totalRecords: records.count,
-            recordsWithMissingImages: missingCount,
-            orphanedImages: orphanedCount,
+            recordsWithMissingImages: missingImageCount,
+            orphanedImages: orphanedImageCount,
+            recordsWithMissingAudio: missingAudioCount,
+            orphanedAudio: orphanedAudioCount,
             duplicateSyncIds: dupCount,
             databaseSizeBytes: dbSize,
-            imagesSizeBytes: imagesSize
+            imagesSizeBytes: imagesSize,
+            audioSizeBytes: audioSize
         )
     }
 
@@ -101,6 +134,20 @@ enum IntegrityService {
         }
     }
 
+    /// Delete audio files that are no longer referenced by any record.
+    private static func checkOrphanedAudio(context: ModelContext) async {
+        let records = (try? context.fetch(FetchDescriptor<Record>())) ?? []
+        let referenced = Set(records.flatMap(\.audioPaths))
+
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(atPath: AudioStorageService.audioDir.path)
+        else { return }
+
+        for file in files where !referenced.contains(file) {
+            try? fm.removeItem(at: AudioStorageService.url(for: file))
+        }
+    }
+
     /// Mark records whose referenced images are missing.
     private static func checkMissingImages(context: ModelContext) async {
         let records = (try? context.fetch(FetchDescriptor<Record>())) ?? []
@@ -113,6 +160,21 @@ enum IntegrityService {
             if hasMissing {
                 // Mark is not persisted in model — we just count it in health.
                 // Future: add `hasMissingImages` field if needed.
+            }
+        }
+    }
+
+    /// Mark records whose referenced audio files are missing.
+    private static func checkMissingAudio(context: ModelContext) async {
+        let records = (try? context.fetch(FetchDescriptor<Record>())) ?? []
+        let fm = FileManager.default
+
+        for record in records {
+            let hasMissing = record.audioPaths.contains { path in
+                !fm.fileExists(atPath: AudioStorageService.url(for: path).path)
+            }
+            if hasMissing {
+                // Counted in health snapshot — no auto‑repair needed.
             }
         }
     }
@@ -185,9 +247,12 @@ extension DatabaseHealth {
     static let zero = DatabaseHealth(
         totalRecords: 0,
         recordsWithMissingImages: 0,
+        recordsWithMissingAudio: 0,
         orphanedImages: 0,
+        orphanedAudio: 0,
         duplicateSyncIds: 0,
         databaseSizeBytes: 0,
-        imagesSizeBytes: 0
+        imagesSizeBytes: 0,
+        audioSizeBytes: 0
     )
 }

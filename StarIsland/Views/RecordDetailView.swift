@@ -29,6 +29,7 @@ struct RecordDetailView: View {
 
                 bodyContent
                 imageSection
+                audioSection
             }
             .padding(AppTheme.spacing.xxxlarge)
         }
@@ -112,6 +113,38 @@ struct RecordDetailView: View {
                 .frame(maxHeight: 320)
                 .clipped()
                 .cornerRadius(18)
+        }
+    }
+
+    // MARK: - Audio
+
+    @ViewBuilder
+    private var audioSection: some View {
+        if !record.audioPaths.isEmpty {
+            VStack(alignment: .leading, spacing: AppTheme.spacing.medium) {
+                Divider()
+
+                Text("语音记录")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.primary)
+
+                ForEach(record.audioPaths, id: \.self) { audioPath in
+                    AudioPlayButton(
+                        audioPath: audioPath,
+                        showTranscribe: true,
+                        onTranscribe: { text in
+                            if record.text.isEmpty {
+                                record.text = text
+                            } else {
+                                record.text += "\n" + text
+                            }
+                            record.updatedAt = Date()
+                            try? modelContext.save()
+                        }
+                    )
+                }
+            }
         }
     }
 

@@ -87,7 +87,11 @@ struct DataHealthView: View {
                         label: "图片占用",
                         value: byteFormatter.string(fromByteCount: health.imagesSizeBytes))
 
-                let total = health.databaseSizeBytes + health.imagesSizeBytes
+                StatRow(icon: "waveform",
+                        label: "音频占用",
+                        value: byteFormatter.string(fromByteCount: health.audioSizeBytes))
+
+                let total = health.databaseSizeBytes + health.imagesSizeBytes + health.audioSizeBytes
                 StatRow(icon: "archivebox",
                         label: "总计",
                         value: byteFormatter.string(fromByteCount: total))
