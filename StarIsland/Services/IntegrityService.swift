@@ -35,24 +35,28 @@ struct DatabaseHealth: Sendable {
 
 /// Background data integrity checks and automatic repair.
 ///
-/// All methods run asynchronously and never block the main thread.
+/// All methods are `@MainActor` because `ModelContext` is not `Sendable`.
 /// Called once at app launch via ``IntegrityService.runAll(context:)``.
+@MainActor
 enum IntegrityService {
 
-    /// Run every health check and auto‑repair.
-    /// - Parameter context: A fresh `ModelContext`.
+    /// Run every health check and auto‑repair **sequentially**.
+    ///
+    /// Must run on `@MainActor` — ``ModelContext`` is not `Sendable`, so
+    /// concurrent access (e.g. via ``withTaskGroup``) produces
+    /// `EXC_BAD_ACCESS` as multiple child tasks read the same context
+    /// while ``fixDuplicateSyncIds(context:)`` deletes records.
+    /// - Parameter context: A `ModelContext` created on the MainActor.
     static func runAll(context: ModelContext) async {
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { await checkOrphanedImages(context: context) }
-            group.addTask { await checkOrphanedAudio(context: context) }
-            group.addTask { await checkMissingImages(context: context) }
-            group.addTask { await checkMissingAudio(context: context) }
-            group.addTask { await fixDuplicateSyncIds(context: context) }
-        }
+        await checkOrphanedImages(context: context)
+        await checkOrphanedAudio(context: context)
+        await checkMissingImages(context: context)
+        await checkMissingAudio(context: context)
+        await fixDuplicateSyncIds(context: context)
     }
 
     /// Compute a health snapshot (read‑only, no repair).
-    /// - Parameter context: A `ModelContext` on any actor.
+    /// - Parameter context: A `ModelContext` (must be on `@MainActor`).
     /// - Returns: A ``DatabaseHealth`` struct.
     static func computeHealth(context: ModelContext) async -> DatabaseHealth {
         let records = (try? context.fetch(FetchDescriptor<Record>())) ?? []
