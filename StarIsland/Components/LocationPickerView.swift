@@ -58,6 +58,7 @@ struct LocationPickerView: View {
     @State private var nearbyPlaces: [NearbyPlace] = []
     @State private var searchResults: [NearbyPlace] = []
     @State private var cameraPosition: MapCameraPosition
+    @State private var mapCenter: CLLocationCoordinate2D
     @State private var selectedPlace: NearbyPlace?
     @State private var isFetchingCurrentLocation = false
     @State private var searchTask: Task<Void, Never>?
@@ -88,18 +89,22 @@ struct LocationPickerView: View {
         self._selectedPlacemark = selectedPlacemark
 
         // Start at existing location or default to Xi'an
+        let initialCenter: CLLocationCoordinate2D
         if let lat = selectedLatitude.wrappedValue,
            let lng = selectedLongitude.wrappedValue {
+            initialCenter = CLLocationCoordinate2D(latitude: lat, longitude: lng)
             _cameraPosition = State(initialValue: .region(MKCoordinateRegion(
-                center: CLLocationCoordinate2D(latitude: lat, longitude: lng),
+                center: initialCenter,
                 span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
             )))
         } else {
+            initialCenter = CLLocationCoordinate2D(latitude: 34.3416, longitude: 108.9398)
             _cameraPosition = State(initialValue: .region(MKCoordinateRegion(
-                center: CLLocationCoordinate2D(latitude: 34.3416, longitude: 108.9398),
+                center: initialCenter,
                 span: MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05)
             )))
         }
+        _mapCenter = State(initialValue: initialCenter)
     }
 
     // MARK: - Body
@@ -126,10 +131,10 @@ struct LocationPickerView: View {
                             MapScaleView()
                         }
                         .onMapCameraChange(frequency: .onEnd) { context in
-                            let center = context.region.center
+                            mapCenter = context.region.center
                             // Clear selection when user manually drags the map
                             selectedPlace = nil
-                            Task { await fetchNearbyPlaces(center: center) }
+                            Task { await fetchNearbyPlaces(center: context.region.center) }
                         }
 
                         // Fixed center pin — always stays at map center
@@ -165,9 +170,7 @@ struct LocationPickerView: View {
         }
         .onAppear {
             // Initial nearby fetch
-            if case .region(let region) = cameraPosition {
-                Task { await fetchNearbyPlaces(center: region.center) }
-            }
+            Task { await fetchNearbyPlaces(center: mapCenter) }
         }
     }
 
@@ -409,25 +412,16 @@ struct LocationPickerView: View {
         request.resultTypes = [.pointOfInterest, .address]
 
         // Scope search to current map region
-        if case .region(let region) = cameraPosition {
-            request.region = region
-        } else {
-            request.region = MKCoordinateRegion(
-                center: CLLocationCoordinate2D(latitude: 34.3416, longitude: 108.9398),
-                span: MKCoordinateSpan(latitudeDelta: 0.2, longitudeDelta: 0.2)
-            )
-        }
+        request.region = MKCoordinateRegion(
+            center: mapCenter,
+            span: MKCoordinateSpan(latitudeDelta: 0.2, longitudeDelta: 0.2)
+        )
 
         let search = MKLocalSearch(request: request)
         guard let response = try? await search.start(), !Task.isCancelled else { return }
 
         // Calculate distance from map center
-        let centerLocation: CLLocation
-        if case .region(let region) = cameraPosition {
-            centerLocation = CLLocation(latitude: region.center.latitude, longitude: region.center.longitude)
-        } else {
-            centerLocation = CLLocation(latitude: 34.3416, longitude: 108.9398)
-        }
+        let centerLocation = CLLocation(latitude: mapCenter.latitude, longitude: mapCenter.longitude)
 
         let places = response.mapItems
             // MKPlacemark.coordinate is always valid for MKLocalSearch results
@@ -460,7 +454,7 @@ private struct PlaceRow: View {
     var body: some View {
         HStack(spacing: AppTheme.spacing.medium) {
             Image(systemName: isSelected ? "checkmark.circle.fill" : "mappin.circle")
-                .foregroundStyle(isSelected ? .blue : .tertiary)
+                .foregroundStyle(isSelected ? .blue : Color.secondary.opacity(0.3))
                 .font(.subheadline)
 
             VStack(alignment: .leading, spacing: 2) {
