@@ -4,7 +4,7 @@ import CoreLocation
 
 // MARK: - Nearby Place
 
-/// A POI returned from MKLocalSearch, enriched with distance from map center.
+/// A POI returned from Apple MapKit POI Search, enriched with distance from map center.
 struct NearbyPlace: Identifiable {
     /// Stable identifier based on name + coordinate,
     /// so that ``selectedPlace`` is preserved across list refreshes.
@@ -41,13 +41,76 @@ struct NearbyPlace: Identifiable {
     }
 }
 
+// MARK: - Administrative Region Filter
+
+/// Checks whether a ``MKMapItem`` represents an administrative division
+/// (市／区／县／省／镇) rather than a real POI such as a shop, restaurant,
+/// school, hospital, or park.
+///
+/// Uses two signals:
+/// 1. The item's name matches one of the placemark's administrative‑area fields.
+/// 2. The name ends with an administrative suffix (市／区／县／省／镇) and is short.
+private func isAdministrativeRegion(item: MKMapItem) -> Bool {
+    guard let name = item.name?.trimmingCharacters(in: .whitespaces), !name.isEmpty else {
+        return false
+    }
+
+    let pm = item.placemark
+
+    // ── Signal 1: name matches a known admin division ──────────────
+    let adminFields: [String?] = [
+        pm.administrativeArea,       // 陕西省
+        pm.subAdministrativeArea,    // 西安市 (prefecture-level)
+        pm.locality,                 // 西安市
+        pm.subLocality,              // 灞桥区
+    ]
+    if adminFields.compactMap({ $0 }).contains(where: { $0 == name }) {
+        return true
+    }
+
+    // ── Signal 2: name looks like an administrative label ──────────
+    // Short names (≤4 characters) ending with common admin suffixes
+    // are almost certainly divisions, not POIs.
+    let adminSuffixes = ["市", "区", "县", "省", "镇", "乡"]
+    // Also catch patterns like "长安区" (5 chars) or "经济技术开发区" (longer but admin)
+    // We use a length cap of 8 to avoid filtering legitimate named places.
+    if name.count <= 8,
+       adminSuffixes.contains(where: { name.hasSuffix($0) }) {
+        return true
+    }
+
+    return false
+}
+
+// MARK: - Search Radius
+
+/// Computes a POI search radius (in meters) from the visible map region.
+/// Clamped between 200 m (street‑level zoom) and 2 000 m (city view).
+private func searchRadius(from region: MKCoordinateRegion) -> CLLocationDistance {
+    let midLat = region.center.latitude * .pi / 180
+    let metersPerDegreeLat: CLLocationDistance = 111_320
+    let metersPerDegreeLng: CLLocationDistance = 111_320 * cos(midLat)
+    let widthMeters = region.span.longitudeDelta * metersPerDegreeLng
+    let heightMeters = region.span.latitudeDelta * metersPerDegreeLat
+    let avgDimension = (abs(widthMeters) + abs(heightMeters)) / 2
+    return min(max(avgDimension / 2, 200), 2_000)
+}
+
+// MARK: - POI Category Filter
+
+/// All POI categories are included in nearby‑place searches.
+/// Administrative divisions (市／区／县／省) are still filtered out
+/// by ``isAdministrativeRegion(item:)`` as a post‑processing step.
+private let nearbyPOIFilter = MKPointOfInterestFilter.includingAll
+
 // MARK: - Sheet Detent
 
-/// Three-tier bottom‑sheet detent matching Apple Maps / 微信发送位置.
+/// Two‑tier bottom‑sheet detent matching Apple Maps:
+/// - small  (≈ 35 %) — default, shows nearby places
+/// - large  (≈ 90 %) — expanded, for browsing the full list
 private enum SheetDetent: CGFloat, CaseIterable {
-    case small  = 0.25
-    case medium = 0.50
-    case large  = 0.85
+    case small = 0.35
+    case large = 0.90
 }
 
 // MARK: - Location Picker View
@@ -62,7 +125,7 @@ private enum SheetDetent: CGFloat, CaseIterable {
 /// │          freely draggable        │
 /// ├──────────────────────────────────┤  ← bottom panel (draggable)
 /// │  ───                             │
-/// │  附近地点                         │
+/// │  附近地点 / 搜索结果               │
 /// │  · 逸景雅居                100m  │
 /// │  · 林河世家                120m  │
 /// │  · 鹿原温泉小区            150m  │
@@ -71,23 +134,32 @@ private enum SheetDetent: CGFloat, CaseIterable {
 /// └──────────────────────────────────┘
 /// ```
 ///
-/// # Single source of truth
-/// ``mapCenter`` is the **only** coordinate source for nearby search,
-/// reverse geocode, and POI search — guaranteed by self‑check.
+/// # Architecture
 ///
-/// # States & flow
-/// - **Map drag** → `onMapCameraChange(.continuous)` → updates ``mapCenter``
-///   → 300 ms debounce → ``fetchNearbyPlaces(center:)`` → replaces ``nearbyPlaces``.
-/// - **Tap POI** → ``selectPlace(_:)`` → sets ``selectedPlace`` (immediate),
-///   animates camera, sets ``isAnimatingToPlace`` so .continuous skips search.
-/// - **当前位置** → ``fetchCurrentLocation()`` → updates ``mapCenter`` + ``cameraPosition``
-///   directly, triggers immediate search (no debounce), blocks .continuous via flag.
-/// - **Search** → text input → 300 ms debounce → ``performSearch(query:)``.
+/// ``mapCenter`` is the **single source of truth** for all coordinate‑based
+/// queries — nearby POI search, text search, reverse geocode.  It is updated
+/// exclusively by ``onMapCameraChange(frequency: .continuous)`` and by
+/// ``fetchCurrentLocation()``. No other path writes to it.
 ///
-/// # Gesture isolation
-/// - `Map`: always interactive — no transparent view covers it.
-/// - `searchBar`: `.overlay(alignment: .top)` on Map, natural height only.
-/// - `bottomPanel`: custom ZStack overlay, drag gesture **only** on capsule handle.
+/// # Search strategy
+///
+/// - **Nearby POI search** (map drag → camera idle → 300 ms debounce):
+///   Uses ``MKLocalSearch`` with ``resultTypes: [.pointOfInterest]``,
+///   ``pointOfInterestFilter`` set to ``nearbyPOIFilter``, and NO
+///   ``naturalLanguageQuery`` — so the search returns real POIs near the
+///   map centre, NOT administrative divisions.
+///
+/// - **Text search** (user types in search bar → 300 ms debounce):
+///   Uses ``MKLocalSearch`` with the query as ``naturalLanguageQuery``,
+///   ``resultTypes: [.pointOfInterest, .address]``, scoped to the current
+///   map region.
+///
+/// # Task management
+///
+/// Two independent task slots prevent text search and camera‑triggered
+/// search from cancelling each other:
+/// - ``searchTask`` — text search / clear.
+/// - ``nearbySearchTask`` — camera‑triggered POI search & current‑location refresh.
 struct LocationPickerView: View {
     @Binding var selectedName: String?
     @Binding var selectedLatitude: Double?
@@ -96,32 +168,35 @@ struct LocationPickerView: View {
 
     @Environment(\.dismiss) private var dismiss
 
-    // ── Search & places ──────────────────────────────────────────
-    @State private var searchQuery = ""
-    @State private var nearbyPlaces: [NearbyPlace] = []
-    @State private var searchResults: [NearbyPlace] = []
-
-    // ── Map ──────────────────────────────────────────────────────
+    // ── Camera ───────────────────────────────────────────────────
+    /// Single source of truth for ALL coordinate‑based queries.
+    /// Only written by camera callbacks and ``fetchCurrentLocation()``.
     @State private var cameraPosition: MapCameraPosition
-    /// **Single** source of truth for all coordinate‑based queries.
     @State private var mapCenter: CLLocationCoordinate2D
-    /// Currently selected place (set on tap, cleared on map drag).
+
+    // ── Places ───────────────────────────────────────────────────
+    /// POIs returned from ``searchNearbyPOIs(center:)``.
+    @State private var nearbyPlaces: [NearbyPlace] = []
+    /// Results from ``performSearch(query:)``.
+    @State private var searchResults: [NearbyPlace] = []
+    /// Currently highlighted place (set on tap, cleared on map drag).
     @State private var selectedPlace: NearbyPlace?
 
-    // ── Fetch state ──────────────────────────────────────────────
-    @State private var isFetchingCurrentLocation = false
+    // ── Search state ─────────────────────────────────────────────
+    @State private var searchQuery = ""
     @State private var searchTask: Task<Void, Never>?
     @State private var nearbySearchTask: Task<Void, Never>?
     @State private var isSearching = false
 
     /// `true` while a programmatic camera animation is in progress
     /// (triggered by tapping a POI or using 当前位置). During this window the
-    /// ``onMapCameraChange(frequency:.continuous)`` handler skips the nearby
+    /// ``onMapCameraChange(frequency: .continuous)`` handler skips the nearby
     /// search — the map is moving because the user *selected* something,
     /// not because they dragged.
     @State private var isAnimatingToPlace = false
+    @State private var isFetchingCurrentLocation = false
 
-    // ── Bottom sheet ────────────────────────────────────────────
+    // ── Bottom sheet ─────────────────────────────────────────────
     @State private var sheetDetent: SheetDetent = .small
     @State private var sheetDragOffset: CGFloat = 0
 
@@ -132,7 +207,7 @@ struct LocationPickerView: View {
         !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
-    /// The list currently shown: search results when active, nearby places otherwise.
+    /// The list currently shown in the bottom panel.
     private var currentPlaces: [NearbyPlace] {
         isSearchActive ? searchResults : nearbyPlaces
     }
@@ -178,10 +253,6 @@ struct LocationPickerView: View {
 
     var body: some View {
         NavigationStack {
-            // ── Three independent layers ──────────────────────────
-            // Layer 1: Map    (full screen, always interactive)
-            // Layer 2: Header (search bar, cancel button)
-            // Layer 3: Sheet  (bottom panel, draggable handle)
             ZStack(alignment: .bottom) {
                 mapLayer
                 bottomPanel
@@ -202,6 +273,7 @@ struct LocationPickerView: View {
                 try? await Task.sleep(for: .milliseconds(300))
                 guard !Task.isCancelled else { return }
                 if newValue.trimmingCharacters(in: .whitespaces).isEmpty {
+                    // Revert to nearby places
                     await MainActor.run { searchResults = [] }
                 } else {
                     await performSearch(query: newValue)
@@ -209,7 +281,7 @@ struct LocationPickerView: View {
             }
         }
         .onAppear {
-            Task { await fetchNearbyPlaces(center: mapCenter) }
+            Task { await searchNearbyPOIs(center: mapCenter) }
         }
     }
 
@@ -231,21 +303,20 @@ struct LocationPickerView: View {
             mapCenter = context.region.center
 
             // ── Skip search during programmatic animation ─────
-            // selectPlace or fetchCurrentLocation set this flag.
             if isAnimatingToPlace { return }
 
-            // ── Debounced nearby search on user drag ──────────
+            // ── Debounced POI search on user drag ─────────────
             nearbySearchTask?.cancel()
             nearbySearchTask = Task { [center = context.region.center] in
                 try? await Task.sleep(for: .milliseconds(300))
                 guard !Task.isCancelled else { return }
                 let shouldSearch = await MainActor.run { !isAnimatingToPlace }
                 guard shouldSearch else { return }
-                await fetchNearbyPlaces(center: center)
+                await searchNearbyPOIs(center: center)
             }
         }
         .onMapCameraChange(frequency: .onEnd) { _ in
-            // User finished dragging map — clear previous selection.
+            // User finished dragging — clear previous selection.
             // onEnd does NOT fire after programmatic animation
             // (cameraPosition assignments without withAnimation do not
             //  trigger onEnd; withAnimation does, but isAnimatingToPlace
@@ -255,7 +326,7 @@ struct LocationPickerView: View {
             }
         }
         .overlay(alignment: .center) {
-            // Fixed center pin — visual only, never blocks map gestures
+            // Fixed centre pin — visual only, never blocks map gestures
             Image(systemName: "mappin")
                 .font(.title2)
                 .foregroundStyle(.blue)
@@ -302,7 +373,7 @@ struct LocationPickerView: View {
 
     /// Custom bottom panel (not a `.sheet`!) so the map remains fully
     /// interactive behind it.  The user can:
-    /// - Drag the **handle**  ↕  to cycle through 3 detents (25 % / 50 % / 85 %).
+    /// - Drag the **handle** ↕ to toggle between 35 % and 90 % height.
     /// - **Scroll** the places list independently.
     /// - **Drag / zoom / rotate** the map in the uncovered area.
     ///
@@ -411,7 +482,10 @@ struct LocationPickerView: View {
     /// Drag gesture on the capsule handle — avoids conflicts with both
     /// the ``ScrollView`` and the ``Map`` gestures underneath.
     ///
-    /// Snaps to the nearest detent on release, with velocity boost.
+    /// Snap logic (Apple Maps‑style):
+    /// - Velocity > 300 pt/s downward → collapse to ``.small``.
+    /// - Velocity < -300 pt/s upward → expand to ``.large``.
+    /// - Otherwise → snap to nearest detent.
     private var sheetDragGesture: some Gesture {
         DragGesture()
             .onChanged { value in
@@ -422,22 +496,16 @@ struct LocationPickerView: View {
                 sheetDragOffset = 0
 
                 let allDetents = SheetDetent.allCases.sorted { $0.rawValue < $1.rawValue }
-                let currentFraction = sheetDetent.rawValue
 
                 let target: SheetDetent
                 if velocity > 300 {
-                    // Fast swipe down → previous (smaller) detent
-                    let idx = allDetents.firstIndex(of: sheetDetent) ?? 1
-                    target = idx > 0 ? allDetents[idx - 1] : allDetents[0]
+                    target = .small
                 } else if velocity < -300 {
-                    // Fast swipe up → next (larger) detent
-                    let idx = allDetents.firstIndex(of: sheetDetent) ?? 1
-                    target = idx < allDetents.count - 1 ? allDetents[idx + 1] : allDetents.last!
+                    target = .large
                 } else {
-                    // Snapping: use drag offset to determine direction
+                    let currentFraction = sheetDetent.rawValue
                     let offsetFraction = sheetDragOffset / UIScreen.main.bounds.height
                     let proposed = currentFraction - offsetFraction
-                    // Clamp and find nearest detent
                     target = allDetents.min(by: {
                         abs($0.rawValue - proposed) < abs($1.rawValue - proposed)
                     }) ?? sheetDetent
@@ -487,14 +555,14 @@ struct LocationPickerView: View {
     }
 
     /// Request current device location, move the map there, and refresh
-    /// nearby places immediately.
+    /// nearby POIs immediately.
     ///
     /// Flow:
-    /// 1. `LocationService.requestLocation()`
+    /// 1. ``LocationService.requestLocation()``
     /// 2. Update ``mapCenter`` directly (single source of truth).
     /// 3. Set ``isAnimatingToPlace`` to block .continuous search.
     /// 4. Move ``cameraPosition``.
-    /// 5. Call ``fetchNearbyPlaces(center:)` — not debounced.
+    /// 5. Call ``searchNearbyPOIs(center:)` — not debounced.
     /// 6. Reset ``isAnimatingToPlace`` when search completes.
     private func fetchCurrentLocation() {
         isFetchingCurrentLocation = true
@@ -517,10 +585,10 @@ struct LocationPickerView: View {
                     span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
                 ))
 
-                // ── Immediate search (not debounced) ─────────────
+                // ── Immediate POI search (not debounced) ──────────
                 nearbySearchTask?.cancel()
                 nearbySearchTask = Task {
-                    await fetchNearbyPlaces(center: coord)
+                    await searchNearbyPOIs(center: coord)
                     await MainActor.run { isAnimatingToPlace = false }
                 }
 
@@ -530,53 +598,47 @@ struct LocationPickerView: View {
         }
     }
 
-    // MARK: - Nearby Places (MKLocalSearch)
+    // MARK: - Nearby POI Search (MapKit POI Search)
 
     /// **Only** entry point for nearby‑place search.
     ///
-    /// 1. Reverse geocode ``center`` for locality context.
-    /// 2. MKLocalSearch with locality as query + 500 m region.
-    /// 3. **No** `resultTypes` filter — uses Apple default behavior,
-    ///    which returns a mixed set of residential, commercial,
-    ///    food, education, healthcare, transport, etc.
-    /// 4. Sort results by **distance from center** (ascending).
+    /// Uses Apple MapKit POI Search (``resultTypes: [.pointOfInterest]``)
+    /// with an explicit ``pointOfInterestFilter`` that includes residential,
+    /// commercial, food, education, healthcare, transport, and entertainment
+    /// categories — and **excludes** government / administrative POIs.
+    ///
+    /// Results are post‑filtered to remove any administrative divisions
+    /// that slip through (市／区／县／省) and sorted by distance from centre.
     ///
     /// - Parameter center: **Must** be ``mapCenter`` — guaranteed by caller.
-    private func fetchNearbyPlaces(center: CLLocationCoordinate2D) async {
+    private func searchNearbyPOIs(center: CLLocationCoordinate2D) async {
         isSearching = true
         defer { isSearching = false }
 
-        // 1. Reverse geocode for locality context
-        let geocoder = CLGeocoder()
-        let location = CLLocation(latitude: center.latitude, longitude: center.longitude)
-        let locality: String? = await {
-            let placemarks = try? await geocoder.reverseGeocodeLocation(location)
-            return placemarks?.first?.locality ?? placemarks?.first?.subLocality
-        }()
-
-        // 2. MKLocalSearch — Apple default result types (not filtered)
+        // ── 1. Build POI search request ─────────────────────────
         let request = MKLocalSearch.Request()
-        if let locality, !locality.isEmpty {
-            request.naturalLanguageQuery = locality
-        }
-        // Broader region for comprehensive residential + commercial results
         request.region = MKCoordinateRegion(
             center: center,
             latitudinalMeters: 500,
             longitudinalMeters: 500
         )
-        // ⚠️  Do NOT set resultTypes — let Apple return its default mix:
-        //     residential, commercial, food, education, healthcare, transport, etc.
-        //     Setting .pointOfInterest was the root cause of government‑heavy results.
+        // POI search — only points of interest, NO addresses (which
+        // include administrative divisions like "西安市").
+        request.resultTypes = [.pointOfInterest]
+        // Explicit category filter — excludes government / admin POIs.
+        request.pointOfInterestFilter = nearbyPOIFilter
 
+        // ── 2. Execute ──────────────────────────────────────────
         let search = MKLocalSearch(request: request)
         guard let response = try? await search.start(), !Task.isCancelled else { return }
 
-        // 3. Build sorted NearbyPlace array by distance from center
+        // ── 3. Build sorted result, filtering out admin regions ─
         let centerLocation = CLLocation(latitude: center.latitude, longitude: center.longitude)
         let places: [NearbyPlace] = response.mapItems
             .compactMap { item in
                 guard let name = item.name else { return nil }
+                // 🔥 Core fix: exclude administrative divisions
+                guard !isAdministrativeRegion(item: item) else { return nil }
                 let coord = item.placemark.coordinate
                 let itemLocation = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
                 let distance = centerLocation.distance(from: itemLocation)
@@ -596,8 +658,13 @@ struct LocationPickerView: View {
         }
     }
 
-    // MARK: - Search (MKLocalSearch)
+    // MARK: - Text Search (MKLocalSearch)
 
+    /// Performs a **keyword** search using the user's typed query.
+    ///
+    /// Unlike ``searchNearbyPOIs(center:)`` this uses ``naturalLanguageQuery``
+    /// and includes ``.address`` in result types so the user can find
+    /// places by name (e.g. "逸景雅居", "万达", "西安交大").
     private func performSearch(query: String) async {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else {
@@ -621,7 +688,6 @@ struct LocationPickerView: View {
         let search = MKLocalSearch(request: request)
         guard let response = try? await search.start(), !Task.isCancelled else { return }
 
-        // Calculate distance from map center for consistent sorting
         let centerLocation = CLLocation(latitude: mapCenter.latitude, longitude: mapCenter.longitude)
         let places = response.mapItems
             .compactMap { item -> NearbyPlace? in

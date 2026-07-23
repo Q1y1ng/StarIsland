@@ -9,7 +9,7 @@
 # StarIsland.xcodeproj.  The .xcodeproj is gitignored.
 # =============================================================================
 # ✦ Bundle ID:  com.starisland.app
-# ✦ Target:     iOS 17.0 (iPhone only)
+# ✦ Target:     iOS 26.5 (iPhone only)
 # ✦ Frameworks: SwiftUI, SwiftData, MapKit, CoreLocation, BackgroundTasks,
 #               Compression, UniformTypeIdentifiers, PhotosUI
 # ✦ Local:      zh_CN (primary)
@@ -20,7 +20,7 @@ name: StarIsland
 options:
   bundleIdPrefix: com.starisland
   deploymentTarget:
-    iOS: "17.0"
+    iOS: "26.5"
   xcodeVersion: "16.2"
   generateEmptyDirectories: false
   usesTabs: false
