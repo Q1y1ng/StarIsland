@@ -29,11 +29,10 @@ struct NearbyPlace: Identifiable {
 /// ```
 /// ┌──────────────────────────────────┐
 /// │  [🔍 搜索地点]                    │
-/// ├──────────────────────────────────┤
 /// │                   📍             │
-/// │          MAP (fixed pin)         │
+/// │          MAP (full screen)       │
 /// │                                  │
-/// ├──────────────────────────────────┤
+/// ├──────────────────────────────────┤  ← sheet (draggable)
 /// │  ───                             │
 /// │  附近地点                         │
 /// │  · 逸景雅居                100m  │
@@ -46,6 +45,14 @@ struct NearbyPlace: Identifiable {
 ///
 /// Uses only Apple native frameworks: MapKit, CoreLocation, CLGeocoder,
 /// MKLocalSearch.  No third‑party SDKs.
+///
+/// # Single source of truth
+/// ``mapCenter`` is the **only** coordinate source for nearby search,
+/// reverse geocode, and POI search.  It is updated on every
+/// ``onMapCameraChange(frequency: .continuous)`` callback.  All other
+/// coordinate values (first‑fetch location, current‑location button,
+/// selected‑place coordinate) are used exclusively for map positioning
+/// and record saving — never as input to ``MKLocalSearch``.
 struct LocationPickerView: View {
     @Binding var selectedName: String?
     @Binding var selectedLatitude: Double?
@@ -64,6 +71,7 @@ struct LocationPickerView: View {
     @State private var searchTask: Task<Void, Never>?
     @State private var nearbySearchTask: Task<Void, Never>?
     @State private var isSearching = false
+    @State private var isSheetPresented = true
 
     private let locationService = LocationService.shared
 
@@ -111,42 +119,44 @@ struct LocationPickerView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .bottom) {
-                // ── Map layer ──────────────────────────────────────────
-                VStack(spacing: 0) {
-                    searchBar
-                        .padding(.horizontal, AppTheme.spacing.xlarge)
-                        .padding(.vertical, AppTheme.spacing.medium)
-
-                    ZStack {
-                        Map(position: $cameraPosition) {
-                            // Marker at selected place
-                            if let place = selectedPlace {
-                                Marker(place.name, coordinate: place.coordinate)
-                            }
-                        }
-                        .mapStyle(.standard)
-                        .mapControls {
-                            MapCompass()
-                            MapScaleView()
-                        }
-                        .onMapCameraChange(frequency: .onEnd) { context in
-                            mapCenter = context.region.center
-                            // Clear selection when user manually drags the map
-                            selectedPlace = nil
-                            Task { await fetchNearbyPlaces(center: context.region.center) }
-                        }
-
-                        // Fixed center pin — always stays at map center
-                        Image(systemName: "mappin")
-                            .font(.title2)
-                            .foregroundStyle(.blue)
-                            .offset(y: -16)
-                    }
+            Map(position: $cameraPosition) {
+                // Marker at selected place
+                if let place = selectedPlace {
+                    Marker(place.name, coordinate: place.coordinate)
                 }
+            }
+            .mapStyle(.standard)
+            .mapControls {
+                MapCompass()
+                MapScaleView()
+            }
+            .onMapCameraChange(frequency: .continuous) { context in
+                // ── Single source of truth ──────────────────────────
+                mapCenter = context.region.center
 
-                // ── Bottom Sheet ───────────────────────────────────────
-                bottomSheet
+                // ── Debounced nearby search ────────────────────────
+                nearbySearchTask?.cancel()
+                nearbySearchTask = Task { [center = context.region.center] in
+                    try? await Task.sleep(for: .milliseconds(300))
+                    guard !Task.isCancelled else { return }
+                    await fetchNearbyPlaces(center: center)
+                }
+            }
+            .onMapCameraChange(frequency: .onEnd) { _ in
+                // User finished dragging — clear previous selection
+                selectedPlace = nil
+            }
+            .overlay(alignment: .center) {
+                // Fixed center pin — always stays at map center
+                Image(systemName: "mappin")
+                    .font(.title2)
+                    .foregroundStyle(.blue)
+                    .offset(y: -16)
+            }
+            .overlay(alignment: .top) {
+                searchBar
+                    .padding(.horizontal, AppTheme.spacing.xlarge)
+                    .padding(.vertical, AppTheme.spacing.medium)
             }
             .navigationTitle("选择位置")
             .navigationBarTitleDisplayMode(.inline)
@@ -154,6 +164,12 @@ struct LocationPickerView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
                 }
+            }
+            .sheet(isPresented: $isSheetPresented) {
+                bottomSheetContent
+                    .presentationDetents([.fraction(0.28), .medium, .large])
+                    .presentationDragIndicator(.visible)
+                    .interactiveDismissDisabled()
             }
         }
         .onChange(of: searchQuery) { _, newValue in
@@ -169,7 +185,7 @@ struct LocationPickerView: View {
             }
         }
         .onAppear {
-            // Initial nearby fetch
+            // Initial nearby fetch (uses mapCenter set in init)
             Task { await fetchNearbyPlaces(center: mapCenter) }
         }
     }
@@ -203,16 +219,13 @@ struct LocationPickerView: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
-    // MARK: - Bottom Sheet
+    // MARK: - Bottom Sheet Content
 
-    private var bottomSheet: some View {
+    /// Content shown inside the draggable sheet.
+    /// The sheet has ``presentationDetents`` so the user can drag between
+    /// `.fraction(0.28)`, `.medium`, and `.large`.
+    private var bottomSheetContent: some View {
         VStack(spacing: 0) {
-            // ── Drag handle ───────────────────────────────────────────
-            Capsule()
-                .fill(.tertiary)
-                .frame(width: 36, height: 5)
-                .padding(.vertical, 8)
-
             // ── Header ────────────────────────────────────────────────
             HStack {
                 Text(isSearchActive ? "搜索结果" : "附近地点")
@@ -225,15 +238,17 @@ struct LocationPickerView: View {
                 }
             }
             .padding(.horizontal, AppTheme.spacing.xlarge)
+            .padding(.top, AppTheme.spacing.medium)
             .padding(.bottom, AppTheme.spacing.small)
 
             // ── Places list ───────────────────────────────────────────
             if currentPlaces.isEmpty && !isSearching {
+                Spacer()
                 Text(isSearchActive ? "未找到地点" : "拖动地图查找附近地点")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, AppTheme.spacing.large)
+                Spacer()
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
@@ -251,49 +266,48 @@ struct LocationPickerView: View {
                         }
                     }
                 }
-                .frame(maxHeight: 260)
             }
 
-            // ── Current location ──────────────────────────────────────
-            Divider()
-                .padding(.horizontal, AppTheme.spacing.xlarge)
+            // ── Current location + Confirm ────────────────────────────
+            VStack(spacing: 0) {
+                Divider()
+                    .padding(.horizontal, AppTheme.spacing.xlarge)
 
-            Button {
-                fetchCurrentLocation()
-            } label: {
-                HStack(spacing: AppTheme.spacing.medium) {
-                    Image(systemName: "location.fill")
-                        .font(.subheadline)
-                    Text("当前位置")
-                        .font(.subheadline)
-                    if isFetchingCurrentLocation {
-                        ProgressView()
-                            .controlSize(.mini)
+                Button {
+                    fetchCurrentLocation()
+                } label: {
+                    HStack(spacing: AppTheme.spacing.medium) {
+                        Image(systemName: "location.fill")
+                            .font(.subheadline)
+                        Text("当前位置")
+                            .font(.subheadline)
+                        if isFetchingCurrentLocation {
+                            ProgressView()
+                                .controlSize(.mini)
+                        }
+                        Spacer()
                     }
-                    Spacer()
+                    .padding(.horizontal, AppTheme.spacing.xlarge)
+                    .padding(.vertical, AppTheme.spacing.medium)
                 }
-                .padding(.horizontal, AppTheme.spacing.xlarge)
-                .padding(.vertical, AppTheme.spacing.medium)
-            }
-            .disabled(isFetchingCurrentLocation)
+                .disabled(isFetchingCurrentLocation)
 
-            // ── Confirm button ────────────────────────────────────────
-            Button(action: confirmSelection) {
-                Text("确定")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(selectedPlace != nil ? Color.blue : Color.blue.opacity(0.3))
-                    .foregroundStyle(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                Button(action: confirmSelection) {
+                    Text("确定")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(selectedPlace != nil ? Color.blue : Color.blue.opacity(0.3))
+                        .foregroundStyle(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .disabled(selectedPlace == nil)
+                .padding(.horizontal, AppTheme.spacing.xlarge)
+                .padding(.bottom, AppTheme.spacing.medium)
             }
-            .disabled(selectedPlace == nil)
-            .padding(.horizontal, AppTheme.spacing.xlarge)
-            .padding(.bottom, AppTheme.spacing.medium)
         }
         .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     // MARK: - Actions
@@ -302,6 +316,10 @@ struct LocationPickerView: View {
         selectedPlace = place
 
         // Animate map to center on the selected place
+        // This triggers onMapCameraChange(.continuous) which updates
+        // mapCenter and starts a debounced nearby search.  Since
+        // onMapCameraChange(.onEnd) only fires after gesture end
+        // (not programmatic animation), selectedPlace is preserved.
         withAnimation(.easeInOut(duration: 0.35)) {
             cameraPosition = .region(MKCoordinateRegion(
                 center: place.coordinate,
@@ -326,11 +344,14 @@ struct LocationPickerView: View {
             let result = await locationService.requestLocation()
             await MainActor.run {
                 if let lat = result.latitude, let lng = result.longitude {
+                    // Clear any previous selection — map is moving to a new center
+                    selectedPlace = nil
                     cameraPosition = .region(MKCoordinateRegion(
                         center: CLLocationCoordinate2D(latitude: lat, longitude: lng),
                         span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
                     ))
-                    // onMapCameraChange(.onEnd) will trigger nearby fetch
+                    // onMapCameraChange(.continuous) + 300ms debounce
+                    // will trigger nearby search with the new mapCenter
                 }
                 isFetchingCurrentLocation = false
             }
@@ -340,9 +361,13 @@ struct LocationPickerView: View {
     // MARK: - Nearby Places (MKLocalSearch)
 
     /// Fetch nearby POIs around `center` using MKLocalSearch.
+    ///
     /// 1. Reverse geocode to get locality hint.
     /// 2. MKLocalSearch with the locality as query, ~300m radius.
     /// 3. Sort results by distance from center.
+    ///
+    /// - Parameter center: **Must** be ``mapCenter`` — this is the single
+    ///   source of truth for all coordinate-based queries.
     private func fetchNearbyPlaces(center: CLLocationCoordinate2D) async {
         isSearching = true
         defer { isSearching = false }
@@ -356,7 +381,7 @@ struct LocationPickerView: View {
             return placemarks?.first?.subLocality ?? placemarks?.first?.locality
         }()
 
-        // 2. Search nearby POIs
+        // 2. Search nearby POIs using mapCenter as the sole coordinate source
         let request = MKLocalSearch.Request()
         if let locality, !locality.isEmpty {
             request.naturalLanguageQuery = locality
@@ -374,7 +399,6 @@ struct LocationPickerView: View {
         // 3. Build NearbyPlace array sorted by distance
         let centerLocation = CLLocation(latitude: center.latitude, longitude: center.longitude)
         let places = response.mapItems
-            // MKPlacemark.coordinate is always valid for MKLocalSearch results
             .map { item -> NearbyPlace in
                 let coord = item.placemark.coordinate
                 let itemLocation = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
@@ -411,7 +435,7 @@ struct LocationPickerView: View {
         request.naturalLanguageQuery = trimmed
         request.resultTypes = [.pointOfInterest, .address]
 
-        // Scope search to current map region
+        // Scope search to current map region using mapCenter (single source of truth)
         request.region = MKCoordinateRegion(
             center: mapCenter,
             span: MKCoordinateSpan(latitudeDelta: 0.2, longitudeDelta: 0.2)
@@ -424,7 +448,6 @@ struct LocationPickerView: View {
         let centerLocation = CLLocation(latitude: mapCenter.latitude, longitude: mapCenter.longitude)
 
         let places = response.mapItems
-            // MKPlacemark.coordinate is always valid for MKLocalSearch results
             .map { item -> NearbyPlace in
                 let coord = item.placemark.coordinate
                 let itemLocation = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
