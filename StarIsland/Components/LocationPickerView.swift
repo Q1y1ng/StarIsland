@@ -404,13 +404,7 @@ struct LocationPickerView: View {
         .frame(maxWidth: .infinity)
         .background(.regularMaterial)
         // Only top corners are rounded — bottom is flush with screen edge
-        .clipShape(UnevenRoundedRectangle(
-            topLeading: 16,
-            bottomLeading: 0,
-            bottomTrailing: 0,
-            topTrailing: 16,
-            style: .continuous
-        ))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .zIndex(50)
     }
 
