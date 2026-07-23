@@ -686,7 +686,7 @@ struct LocationPickerView: View {
         // ── 3. Debug: log every raw result ───────────────────────
         print("[LocationPicker] Apple Returned: \(response.mapItems.count) items")
         for (i, item) in response.mapItems.enumerated() {
-            let cat = item.pointOfInterestCategory?.rawValue ?? -1
+            let cat = item.pointOfInterestCategory?.rawValue ?? "unknown"
             print("  [\(i)] name=\(item.name ?? "nil") category=\(cat) title=\(item.placemark.title ?? "nil")")
         }
 
