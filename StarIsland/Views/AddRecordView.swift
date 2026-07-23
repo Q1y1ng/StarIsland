@@ -41,7 +41,6 @@ struct AddRecordView: View {
     @State private var isLocationEnabled = true
     @State private var isFetchingLocation = false
     @State private var showingLocationPicker = false
-    @State private var showingNamePicker = false
 
     // ── Image viewer state ────────────────────────────────────────
     @State private var viewerIndex: Int?
@@ -140,12 +139,6 @@ struct AddRecordView: View {
                     selectedPlacemark: $locationPlacemark
                 )
             }
-            .sheet(isPresented: $showingNamePicker) {
-                LocationNamePickerSheet(
-                    placemark: locationPlacemark,
-                    selectedName: $locationName
-                )
-            }
             .fullScreenCover(isPresented: $showViewer) {
                 if let idx = viewerIndex {
                     PhotoViewer(imagePaths: imagePaths, initialIndex: idx)
@@ -208,9 +201,9 @@ struct AddRecordView: View {
                             .foregroundStyle(.tertiary)
                     }
                 } else if let name = locationName {
-                    // Location name → tap for hierarchy picker
+                    // Location name → tap to change via map picker
                     Button {
-                        openNamePicker()
+                        showingLocationPicker = true
                     } label: {
                         HStack(spacing: AppTheme.spacing.small) {
                             Image(systemName: "location.fill")
@@ -223,13 +216,17 @@ struct AddRecordView: View {
                         }
                     }
 
-                    // Map picker button
-                    Button {
-                        showingLocationPicker = true
-                    } label: {
-                        Image(systemName: "map")
-                            .font(.caption2)
-                            .foregroundStyle(.blue)
+                    Spacer()
+
+                    if !isFetchingLocation {
+                        Button {
+                            fetchLocation()
+                        } label: {
+                            Text("重新获取")
+                                .font(.caption)
+                                .foregroundStyle(.blue)
+                        }
+                        .disabled(isFetchingLocation)
                     }
                 } else {
                     HStack(spacing: AppTheme.spacing.small) {
@@ -240,19 +237,19 @@ struct AddRecordView: View {
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                     }
-                }
 
-                Spacer()
+                    Spacer()
 
-                if !isFetchingLocation {
-                    Button {
-                        fetchLocation()
-                    } label: {
-                        Text("重新获取")
-                            .font(.caption)
-                            .foregroundStyle(.blue)
+                    if !isFetchingLocation {
+                        Button {
+                            fetchLocation()
+                        } label: {
+                            Text("重新获取")
+                                .font(.caption)
+                                .foregroundStyle(.blue)
+                        }
+                        .disabled(isFetchingLocation)
                     }
-                    .disabled(isFetchingLocation)
                 }
             }
             .padding(.leading, AppTheme.spacing.xxlarge)
@@ -436,35 +433,6 @@ struct AddRecordView: View {
         }
     }
 
-    // MARK: - Location Name Picker
-
-    /// Opens the hierarchy picker for choosing address level.
-    /// Fetches placemark from coordinates if not already available.
-    private func openNamePicker() {
-        if locationPlacemark != nil {
-            showingNamePicker = true
-            return
-        }
-
-        guard let lat = locationLatitude, let lng = locationLongitude else { return }
-
-        Task {
-            let geocoder = CLGeocoder()
-            let location = CLLocation(latitude: lat, longitude: lng)
-            let placemarks: [CLPlacemark] = await withCheckedContinuation { continuation in
-                geocoder.reverseGeocodeLocation(location) { marks, _ in
-                    continuation.resume(returning: marks ?? [])
-                }
-            }
-            await MainActor.run {
-                locationPlacemark = placemarks.first
-                if locationPlacemark != nil {
-                    showingNamePicker = true
-                }
-            }
-        }
-    }
-
     // MARK: - Actions
 
     private func handleCameraImage() {
@@ -510,7 +478,15 @@ struct AddRecordView: View {
 
         isSaving = true
 
-        print("[AddRecord] save: text=\(trimmed.prefix(50)) images=\(imagePaths.count) audio=\(audioPaths.count) location=\(locationName ?? "nil") mood=\(selectedMood?.title ?? "nil")")
+        // Construct full address from saved placemark
+        let address = locationPlacemark.flatMap { pm in
+            let parts = [pm.administrativeArea, pm.locality, pm.subLocality,
+                         pm.thoroughfare, pm.subThoroughfare]
+                .compactMap { $0 }
+            return parts.isEmpty ? nil : parts.joined(separator: "")
+        }
+
+        print("[AddRecord] save: text=\(trimmed.prefix(50)) images=\(imagePaths.count) audio=\(audioPaths.count) location=\(locationName ?? "nil") mood=\(selectedMood?.title ?? "nil") address=\(address ?? "nil")")
 
         let record = Record(
             text: trimmed,
@@ -519,7 +495,8 @@ struct AddRecordView: View {
             latitude: isLocationEnabled ? locationLatitude : nil,
             longitude: isLocationEnabled ? locationLongitude : nil,
             imagePaths: imagePaths,
-            audioPaths: audioPaths
+            audioPaths: audioPaths,
+            address: address
         )
 
         modelContext.insert(record)
@@ -560,81 +537,6 @@ private struct LocalImageThumb: View {
     }
 }
 
-// MARK: - Location Name Picker Sheet
-
-/// Sheet that lets the user choose which address level to save.
-/// Shows all available hierarchy levels from the placemark.
-private struct LocationNamePickerSheet: View {
-    let placemark: CLPlacemark?
-    @Binding var selectedName: String?
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            List {
-                if let pm = placemark {
-                    // 1. Door number (thoroughfare + subThoroughfare)
-                    if let thr = pm.thoroughfare, let sub = pm.subThoroughfare {
-                        nameRow("\(thr) \(sub)", subtitle: "门牌号")
-                    }
-                    // 2. Street (thoroughfare only)
-                    if let thr = pm.thoroughfare {
-                        nameRow(thr, subtitle: "街道")
-                    }
-                    // 3. Neighborhood / 商圈 (subLocality)
-                    if let sub = pm.subLocality {
-                        nameRow(sub, subtitle: "社区 · 商圈")
-                    }
-                    // 4. District + city (subAdministrativeArea + locality)
-                    if let sub = pm.subAdministrativeArea, let loc = pm.locality {
-                        nameRow("\(sub) · \(loc)", subtitle: "行政区")
-                    }
-                    // 5. City (locality only)
-                    if let loc = pm.locality {
-                        nameRow(loc, subtitle: "城市")
-                    }
-                    // 6. POI / place name (last resort)
-                    if let name = pm.name {
-                        nameRow(name, subtitle: "POI 名称")
-                    }
-                } else {
-                    Text("无法获取地点详细信息")
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            .navigationTitle("选择地点名称")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
-                }
-            }
-        }
-    }
-
-    private func nameRow(_ name: String, subtitle: String) -> some View {
-        Button {
-            selectedName = name
-            dismiss()
-        } label: {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(name)
-                        .font(.body)
-                        .foregroundStyle(.primary)
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-                Spacer()
-                if let current = selectedName, current == name {
-                    Image(systemName: "checkmark")
-                        .foregroundStyle(.blue)
-                }
-            }
-        }
-    }
-}
 
 // MARK: - Preview
 

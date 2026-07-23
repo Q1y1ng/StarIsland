@@ -49,6 +49,13 @@ final class Record {
     /// Multiple recordings are supported per record.
     var audioPaths: [String] = []
 
+    // MARK: - Phase T4.8 (Full Address)
+
+    /// Full address string constructed from the selected placemark
+    /// (e.g. "陕西省西安市长安区韦曲街道逸景雅居").
+    /// Populated when the user picks a location via ``LocationPickerView``.
+    var address: String?
+
     // MARK: - Phase 4 (Sync)
 
     /// Stable identifier used for deduplication during cross‑device sync and
@@ -73,7 +80,8 @@ final class Record {
         weather: String? = nil,
         tags: [String] = [],
         imagePaths: [String] = [],
-        audioPaths: [String] = []
+        audioPaths: [String] = [],
+        address: String? = nil
     ) {
         let now = Date()
 
@@ -94,6 +102,8 @@ final class Record {
 
         self.isTrashed = false
         self.trashedAt = nil
+
+        self.address = address
 
         self.syncId = nil
         self.syncVersion = 1

@@ -79,6 +79,13 @@ struct RecordDetailView: View {
                     Label(location, systemImage: "location.fill")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+
+                    if let address = record.address {
+                        Text(address)
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .padding(.leading, AppTheme.spacing.large + 4)
+                    }
                 }
 
                 if let mood = record.mood {

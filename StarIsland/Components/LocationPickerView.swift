@@ -2,14 +2,50 @@ import SwiftUI
 import MapKit
 import CoreLocation
 
+// MARK: - Nearby Place
+
+/// A POI returned from MKLocalSearch, enriched with distance from map center.
+struct NearbyPlace: Identifiable {
+    let id = UUID()
+    let name: String
+    let coordinate: CLLocationCoordinate2D
+    let distance: CLLocationDistance
+    let placemark: CLPlacemark
+    let mapItem: MKMapItem
+
+    var distanceFormatted: String {
+        if distance < 1000 {
+            return "\(Int(distance))m"
+        } else {
+            return String(format: "%.1fkm", distance / 1000)
+        }
+    }
+}
+
 // MARK: - Location Picker View
 
-/// A bottom sheet that lets the user pick a location via map drag (fixed pin),
-/// search, or current location.  Uses the iOS 17+ MapKit API (no UIKit).
+/// Apple Maps‑style location picker.
 ///
-/// Single source of truth: `cameraPosition`.  Center coordinate is obtained
-/// exclusively through `onMapCameraChange { context.region.center }` — no
-/// pattern matching on `MapCameraPosition`.
+/// ```
+/// ┌──────────────────────────────────┐
+/// │  [🔍 搜索地点]                    │
+/// ├──────────────────────────────────┤
+/// │                   📍             │
+/// │          MAP (fixed pin)         │
+/// │                                  │
+/// ├──────────────────────────────────┤
+/// │  ───                             │
+/// │  附近地点                         │
+/// │  · 逸景雅居                100m  │
+/// │  · 林河世家                120m  │
+/// │  · 鹿原温泉小区            150m  │
+/// │  [📍 当前位置]                    │
+/// │  [确定]                          │
+/// └──────────────────────────────────┘
+/// ```
+///
+/// Uses only Apple native frameworks: MapKit, CoreLocation, CLGeocoder,
+/// MKLocalSearch.  No third‑party SDKs.
 struct LocationPickerView: View {
     @Binding var selectedName: String?
     @Binding var selectedLatitude: Double?
@@ -19,24 +55,26 @@ struct LocationPickerView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var searchQuery = ""
-    @State private var searchResults: [MKMapItem] = []
+    @State private var nearbyPlaces: [NearbyPlace] = []
+    @State private var searchResults: [NearbyPlace] = []
     @State private var cameraPosition: MapCameraPosition
-    @State private var currentPlacemark: CLPlacemark?
+    @State private var selectedPlace: NearbyPlace?
     @State private var isFetchingCurrentLocation = false
     @State private var searchTask: Task<Void, Never>?
-    @State private var geocodeTask: Task<Void, Never>?
-
-    /// Identifiable wrapper for MKMapItem (not Hashable)
-    private struct MapItemWrapper: Identifiable {
-        let id = UUID()
-        let item: MKMapItem
-    }
-
-    private var searchItemWrappers: [MapItemWrapper] {
-        searchResults.map { MapItemWrapper(item: $0) }
-    }
+    @State private var nearbySearchTask: Task<Void, Never>?
+    @State private var isSearching = false
 
     private let locationService = LocationService.shared
+
+    /// Whether the user has typed something in the search bar.
+    private var isSearchActive: Bool {
+        !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// The list currently shown: search results when active, nearby places otherwise.
+    private var currentPlaces: [NearbyPlace] {
+        isSearchActive ? searchResults : nearbyPlaces
+    }
 
     // MARK: - Init
 
@@ -68,44 +106,42 @@ struct LocationPickerView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                // ── Search bar ───────────────────────────────────────
-                searchBar
-                    .padding(.horizontal, AppTheme.spacing.xlarge)
-                    .padding(.vertical, AppTheme.spacing.medium)
+            ZStack(alignment: .bottom) {
+                // ── Map layer ──────────────────────────────────────────
+                VStack(spacing: 0) {
+                    searchBar
+                        .padding(.horizontal, AppTheme.spacing.xlarge)
+                        .padding(.vertical, AppTheme.spacing.medium)
 
-                // ── Map with fixed pin overlay ───────────────────────
-                ZStack {
-                    Map(position: $cameraPosition) {
-                        // Search result markers
-                        ForEach(searchItemWrappers) { wrapper in
-                            Marker(item: wrapper.item)
+                    ZStack {
+                        Map(position: $cameraPosition) {
+                            // Marker at selected place
+                            if let place = selectedPlace {
+                                Marker(place.name, coordinate: place.coordinate)
+                            }
                         }
-                    }
-                    .mapStyle(.standard)
-                    .mapControls {
-                        MapCompass()
-                        MapScaleView()
-                    }
-                    .onMapCameraChange { context in
-                        let center = context.region.center
-                        geocodeTask?.cancel()
-                        geocodeTask = Task {
-                            try? await Task.sleep(for: .milliseconds(300))
-                            guard !Task.isCancelled else { return }
-                            await reverseGeocode(coordinate: center)
+                        .mapStyle(.standard)
+                        .mapControls {
+                            MapCompass()
+                            MapScaleView()
                         }
-                    }
+                        .onMapCameraChange(frequency: .onEnd) { context in
+                            let center = context.region.center
+                            // Clear selection when user manually drags the map
+                            selectedPlace = nil
+                            Task { await fetchNearbyPlaces(center: center) }
+                        }
 
-                    // Fixed center pin — always stays at map center
-                    Image(systemName: "mappin")
-                        .font(.title)
-                        .foregroundStyle(.blue)
-                        .offset(y: -16) // pin tip aligns with center
+                        // Fixed center pin — always stays at map center
+                        Image(systemName: "mappin")
+                            .font(.title2)
+                            .foregroundStyle(.blue)
+                            .offset(y: -16)
+                    }
                 }
 
-                // ── Bottom bar ───────────────────────────────────────
-                bottomBar
+                // ── Bottom Sheet ───────────────────────────────────────
+                bottomSheet
             }
             .navigationTitle("选择位置")
             .navigationBarTitleDisplayMode(.inline)
@@ -120,18 +156,17 @@ struct LocationPickerView: View {
             searchTask = Task {
                 try? await Task.sleep(for: .milliseconds(300))
                 guard !Task.isCancelled else { return }
-                await performSearch(query: newValue)
+                if newValue.trimmingCharacters(in: .whitespaces).isEmpty {
+                    await MainActor.run { searchResults = [] }
+                } else {
+                    await performSearch(query: newValue)
+                }
             }
         }
         .onAppear {
-            // If we have an initial location but no placemark yet,
-            // reverse geocode the initial coordinate
-            if currentPlacemark == nil,
-               let lat = selectedLatitude,
-               let lng = selectedLongitude {
-                Task {
-                    await reverseGeocode(coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lng))
-                }
+            // Initial nearby fetch
+            if case .region(let region) = cameraPosition {
+                Task { await fetchNearbyPlaces(center: region.center) }
             }
         }
     }
@@ -165,161 +200,122 @@ struct LocationPickerView: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
-    // MARK: - Bottom Bar
+    // MARK: - Bottom Sheet
 
-    private var bottomBar: some View {
-        VStack(spacing: AppTheme.spacing.medium) {
-            Divider()
+    private var bottomSheet: some View {
+        VStack(spacing: 0) {
+            // ── Drag handle ───────────────────────────────────────────
+            Capsule()
+                .fill(.tertiary)
+                .frame(width: 36, height: 5)
+                .padding(.vertical, 8)
 
-            // Current location button
-            currentLocationButton
-                .padding(.horizontal, AppTheme.spacing.xlarge)
-
-            // Location details (real-time from map center)
-            if let placemark = currentPlacemark {
-                locationDetailView(placemark)
-                    .padding(.horizontal, AppTheme.spacing.xlarge)
-            }
-
-            // Search results (horizontal scroll)
-            if !searchResults.isEmpty {
-                searchResultsList
-            }
-
-            // Confirm button
-            if currentPlacemark != nil {
-                confirmButton
-                    .padding(.horizontal, AppTheme.spacing.xlarge)
-                    .padding(.bottom, AppTheme.spacing.medium)
-            }
-        }
-        .background(Color(.systemBackground))
-    }
-
-    // MARK: - Current Location Button
-
-    private var currentLocationButton: some View {
-        Button {
-            fetchCurrentLocation()
-        } label: {
-            HStack(spacing: AppTheme.spacing.medium) {
-                Image(systemName: "location.fill")
+            // ── Header ────────────────────────────────────────────────
+            HStack {
+                Text(isSearchActive ? "搜索结果" : "附近地点")
                     .font(.subheadline)
-                Text("当前位置")
-                    .font(.subheadline)
-                if isFetchingCurrentLocation {
+                    .fontWeight(.semibold)
+                Spacer()
+                if isSearching {
                     ProgressView()
                         .controlSize(.mini)
                 }
-                Spacer()
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, AppTheme.spacing.small)
-        }
-        .disabled(isFetchingCurrentLocation)
-    }
-
-    // MARK: - Location Detail View
-
-    @ViewBuilder
-    private func locationDetailView(_ pm: CLPlacemark) -> some View {
-        VStack(spacing: AppTheme.spacing.xsmall) {
-            // Header
-            HStack {
-                Image(systemName: "mappin.circle.fill")
-                    .foregroundStyle(.blue)
-                    .font(.subheadline)
-                Text("当前位置")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                Spacer()
-            }
-
-            // Composed address string (e.g. "长安中路89号 · 小寨 · 雁塔区 · 西安市")
-            let address = buildAddressString(pm)
-            if !address.isEmpty {
-                HStack {
-                    Text(address)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-            }
-
-            // Hierarchy chips (e.g. "门牌 · 街道 · 行政区 · 城市")
-            let chips = buildHierarchyChips(pm)
-            if !chips.isEmpty {
-                HStack(spacing: AppTheme.spacing.small) {
-                    ForEach(Array(chips.enumerated()), id: \.offset) { _, chip in
-                        Text(chip.label)
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color(.systemGray6))
-                            .clipShape(Capsule())
-                    }
-                    Spacer()
-                }
-            }
-        }
-    }
-
-    // MARK: - Search Results List
-
-    private var searchResultsList: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: AppTheme.spacing.medium) {
-                ForEach(searchItemWrappers) { wrapper in
-                    Button {
-                        selectSearchResult(wrapper.item)
-                    } label: {
-                        HStack(spacing: AppTheme.spacing.small) {
-                            Image(systemName: "mappin")
-                                .font(.caption)
-                                .foregroundStyle(.blue)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(wrapper.item.name ?? "")
-                                    .font(.caption)
-                                    .fontWeight(.medium)
-                                    .foregroundStyle(.primary)
-                                if let locality = wrapper.item.placemark.locality {
-                                    Text(locality)
-                                        .font(.caption2)
-                                        .foregroundStyle(.tertiary)
-                                }
-                            }
-                        }
-                        .padding(.horizontal, AppTheme.spacing.medium)
-                        .padding(.vertical, AppTheme.spacing.small)
-                        .background(Color(.systemGray6))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                    }
-                }
             }
             .padding(.horizontal, AppTheme.spacing.xlarge)
-        }
-        .frame(height: 50)
-    }
+            .padding(.bottom, AppTheme.spacing.small)
 
-    // MARK: - Confirm Button
+            // ── Places list ───────────────────────────────────────────
+            if currentPlaces.isEmpty && !isSearching {
+                Text(isSearchActive ? "未找到地点" : "拖动地图查找附近地点")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, AppTheme.spacing.large)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(currentPlaces) { place in
+                            PlaceRow(
+                                place: place,
+                                isSelected: selectedPlace?.id == place.id
+                            )
+                            .onTapGesture { selectPlace(place) }
 
-    private var confirmButton: some View {
-        Button {
-            confirmSelection()
-        } label: {
-            Text("确定")
-                .font(.subheadline)
-                .fontWeight(.semibold)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(Color.blue)
-                .foregroundStyle(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                            if place.id != currentPlaces.last?.id {
+                                Divider()
+                                    .padding(.leading, AppTheme.spacing.xlarge)
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: 260)
+            }
+
+            // ── Current location ──────────────────────────────────────
+            Divider()
+                .padding(.horizontal, AppTheme.spacing.xlarge)
+
+            Button {
+                fetchCurrentLocation()
+            } label: {
+                HStack(spacing: AppTheme.spacing.medium) {
+                    Image(systemName: "location.fill")
+                        .font(.subheadline)
+                    Text("当前位置")
+                        .font(.subheadline)
+                    if isFetchingCurrentLocation {
+                        ProgressView()
+                            .controlSize(.mini)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, AppTheme.spacing.xlarge)
+                .padding(.vertical, AppTheme.spacing.medium)
+            }
+            .disabled(isFetchingCurrentLocation)
+
+            // ── Confirm button ────────────────────────────────────────
+            Button(action: confirmSelection) {
+                Text("确定")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(selectedPlace != nil ? Color.blue : Color.blue.opacity(0.3))
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            .disabled(selectedPlace == nil)
+            .padding(.horizontal, AppTheme.spacing.xlarge)
+            .padding(.bottom, AppTheme.spacing.medium)
         }
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     // MARK: - Actions
+
+    private func selectPlace(_ place: NearbyPlace) {
+        selectedPlace = place
+
+        // Animate map to center on the selected place
+        withAnimation(.easeInOut(duration: 0.35)) {
+            cameraPosition = .region(MKCoordinateRegion(
+                center: place.coordinate,
+                span: MKCoordinateSpan(latitudeDelta: 0.005, longitudeDelta: 0.005)
+            ))
+        }
+    }
+
+    private func confirmSelection() {
+        guard let place = selectedPlace else { return }
+
+        selectedName = place.name
+        selectedLatitude = place.coordinate.latitude
+        selectedLongitude = place.coordinate.longitude
+        selectedPlacemark = place.placemark
+        dismiss()
+    }
 
     private func fetchCurrentLocation() {
         isFetchingCurrentLocation = true
@@ -331,151 +327,159 @@ struct LocationPickerView: View {
                         center: CLLocationCoordinate2D(latitude: lat, longitude: lng),
                         span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
                     ))
-                    // onMapCameraChange will trigger reverse geocode
+                    // onMapCameraChange(.onEnd) will trigger nearby fetch
                 }
                 isFetchingCurrentLocation = false
             }
         }
     }
 
-    private func selectSearchResult(_ item: MKMapItem) {
-        cameraPosition = .region(MKCoordinateRegion(
-            center: item.placemark.coordinate,
-            span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
-        ))
-        searchQuery = ""
-        searchResults = []
-        // onMapCameraChange will trigger reverse geocode for the new center
-    }
+    // MARK: - Nearby Places (MKLocalSearch)
 
-    private func reverseGeocode(coordinate: CLLocationCoordinate2D) async {
+    /// Fetch nearby POIs around `center` using MKLocalSearch.
+    /// 1. Reverse geocode to get locality hint.
+    /// 2. MKLocalSearch with the locality as query, ~300m radius.
+    /// 3. Sort results by distance from center.
+    private func fetchNearbyPlaces(center: CLLocationCoordinate2D) async {
+        isSearching = true
+        defer { isSearching = false }
+
+        // 1. Reverse geocode for locality context
         let geocoder = CLGeocoder()
-        let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        let location = CLLocation(latitude: center.latitude, longitude: center.longitude)
 
-        let placemarks: [CLPlacemark] = await withCheckedContinuation { continuation in
-            geocoder.reverseGeocodeLocation(location) { marks, _ in
-                continuation.resume(returning: marks ?? [])
-            }
+        let locality: String? = await {
+            let placemarks = try? await geocoder.reverseGeocodeLocation(location)
+            return placemarks?.first?.subLocality ?? placemarks?.first?.locality
+        }()
+
+        // 2. Search nearby POIs
+        let request = MKLocalSearch.Request()
+        if let locality, !locality.isEmpty {
+            request.naturalLanguageQuery = locality
         }
+        request.region = MKCoordinateRegion(
+            center: center,
+            latitudinalMeters: 300,
+            longitudinalMeters: 300
+        )
+        request.resultTypes = [.pointOfInterest]
 
-        guard let placemark = placemarks.first, !Task.isCancelled else { return }
+        let search = MKLocalSearch(request: request)
+        guard let response = try? await search.start(), !Task.isCancelled else { return }
+
+        // 3. Build NearbyPlace array sorted by distance
+        let centerLocation = CLLocation(latitude: center.latitude, longitude: center.longitude)
+        let places = response.mapItems
+            // MKPlacemark.coordinate is always valid for MKLocalSearch results
+            .map { item -> NearbyPlace in
+                let coord = item.placemark.coordinate
+                let itemLocation = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+                let distance = centerLocation.distance(from: itemLocation)
+                return NearbyPlace(
+                    name: item.name ?? "未知地点",
+                    coordinate: coord,
+                    distance: distance,
+                    placemark: item.placemark,
+                    mapItem: item
+                )
+            }
+            .sorted { $0.distance < $1.distance }
+
         await MainActor.run {
-            currentPlacemark = placemark
+            guard !Task.isCancelled else { return }
+            nearbyPlaces = places
         }
     }
+
+    // MARK: - Search (MKLocalSearch)
 
     private func performSearch(query: String) async {
-        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
-            searchResults = []
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else {
+            await MainActor.run { searchResults = [] }
             return
         }
 
+        isSearching = true
+        defer { isSearching = false }
+
         let request = MKLocalSearch.Request()
-        request.naturalLanguageQuery = query
+        request.naturalLanguageQuery = trimmed
         request.resultTypes = [.pointOfInterest, .address]
-        // Default region — centers on Xi'an metro area
-        request.region = MKCoordinateRegion(
-            center: CLLocationCoordinate2D(latitude: 34.3416, longitude: 108.9398),
-            span: MKCoordinateSpan(latitudeDelta: 0.2, longitudeDelta: 0.2)
-        )
 
-        do {
-            let search = MKLocalSearch(request: request)
-            let response = try await search.start()
-            await MainActor.run {
-                searchResults = response.mapItems
+        // Scope search to current map region
+        if case .region(let region) = cameraPosition {
+            request.region = region
+        } else {
+            request.region = MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: 34.3416, longitude: 108.9398),
+                span: MKCoordinateSpan(latitudeDelta: 0.2, longitudeDelta: 0.2)
+            )
+        }
+
+        let search = MKLocalSearch(request: request)
+        guard let response = try? await search.start(), !Task.isCancelled else { return }
+
+        // Calculate distance from map center
+        let centerLocation: CLLocation
+        if case .region(let region) = cameraPosition {
+            centerLocation = CLLocation(latitude: region.center.latitude, longitude: region.center.longitude)
+        } else {
+            centerLocation = CLLocation(latitude: 34.3416, longitude: 108.9398)
+        }
+
+        let places = response.mapItems
+            // MKPlacemark.coordinate is always valid for MKLocalSearch results
+            .map { item -> NearbyPlace in
+                let coord = item.placemark.coordinate
+                let itemLocation = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+                let distance = centerLocation.distance(from: itemLocation)
+                return NearbyPlace(
+                    name: item.name ?? "未知地点",
+                    coordinate: coord,
+                    distance: distance,
+                    placemark: item.placemark,
+                    mapItem: item
+                )
             }
-        } catch {
-            print("[LocationPicker] search error: \(error.localizedDescription)")
+
+        await MainActor.run {
+            guard !Task.isCancelled else { return }
+            searchResults = places
         }
     }
+}
 
-    private func confirmSelection() {
-        guard let placemark = currentPlacemark else { return }
+// MARK: - Place Row
 
-        let name = buildSelectedName(from: placemark)
-        let coord = placemark.location?.coordinate
-            ?? CLLocationCoordinate2D(latitude: 34.3416, longitude: 108.9398)
+private struct PlaceRow: View {
+    let place: NearbyPlace
+    let isSelected: Bool
 
-        selectedName = name
-        selectedLatitude = coord.latitude
-        selectedLongitude = coord.longitude
-        selectedPlacemark = placemark
-        dismiss()
-    }
+    var body: some View {
+        HStack(spacing: AppTheme.spacing.medium) {
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "mappin.circle")
+                .foregroundStyle(isSelected ? .blue : .tertiary)
+                .font(.subheadline)
 
-    // MARK: - Helpers
+            VStack(alignment: .leading, spacing: 2) {
+                Text(place.name)
+                    .font(.subheadline)
+                    .fontWeight(isSelected ? .semibold : .regular)
+                    .foregroundStyle(.primary)
 
-    /// Build display name with street-first priority (same as LocationService).
-    private func buildSelectedName(from pm: CLPlacemark) -> String {
-        // 1. Door number (thoroughfare + subThoroughfare)
-        if let thr = pm.thoroughfare, let sub = pm.subThoroughfare {
-            return "\(thr) \(sub)"
-        }
-        // 2. Street (thoroughfare only)
-        if let thr = pm.thoroughfare {
-            return thr
-        }
-        // 3. Neighborhood / 商圈 (subLocality)
-        if let sub = pm.subLocality {
-            return sub
-        }
-        // 4. District + city (subAdministrativeArea + locality)
-        if let sub = pm.subAdministrativeArea, let loc = pm.locality {
-            return "\(sub) · \(loc)"
-        }
-        // 5. City (locality only)
-        if let loc = pm.locality {
-            return loc
-        }
-        // 6. POI / place name (last resort — avoid shop names)
-        if let name = pm.name {
-            return name
-        }
-        // 7. Coordinates
-        let coord = pm.location?.coordinate
-            ?? CLLocationCoordinate2D(latitude: 34.3416, longitude: 108.9398)
-        return String(format: "%.4f, %.4f", coord.latitude, coord.longitude)
-    }
+                Text(place.distanceFormatted)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
 
-    /// Build a readable address string for the detail view.
-    private func buildAddressString(_ pm: CLPlacemark) -> String {
-        var parts: [String] = []
-        if let thr = pm.thoroughfare, let sub = pm.subThoroughfare {
-            parts.append("\(thr) \(sub)")
-        } else if let thr = pm.thoroughfare {
-            parts.append(thr)
+            Spacer()
         }
-        if let sub = pm.subLocality {
-            parts.append(sub)
-        }
-        if let sub = pm.subAdministrativeArea {
-            parts.append(sub)
-        }
-        if let loc = pm.locality {
-            parts.append(loc)
-        }
-        return parts.isEmpty ? (pm.name ?? "未知地点") : parts.joined(separator: " · ")
-    }
-
-    /// Build hierarchy chips for display (e.g. 门牌/街道/行政区/城市).
-    private func buildHierarchyChips(_ pm: CLPlacemark) -> [(label: String, value: String)] {
-        var chips: [(String, String)] = []
-        if let thr = pm.thoroughfare, let sub = pm.subThoroughfare {
-            chips.append(("门牌", "\(thr) \(sub)"))
-        } else if let thr = pm.thoroughfare {
-            chips.append(("街道", thr))
-        }
-        if let sub = pm.subLocality {
-            chips.append(("商圈", sub))
-        }
-        if let sub = pm.subAdministrativeArea {
-            chips.append(("区", sub))
-        }
-        if let loc = pm.locality {
-            chips.append(("市", loc))
-        }
-        return chips
+        .padding(.horizontal, AppTheme.spacing.xlarge)
+        .padding(.vertical, AppTheme.spacing.small)
+        .background(isSelected ? Color.blue.opacity(0.08) : Color.clear)
+        .contentShape(Rectangle())
     }
 }
 
