@@ -6,12 +6,32 @@ import CoreLocation
 
 /// A POI returned from MKLocalSearch, enriched with distance from map center.
 struct NearbyPlace: Identifiable {
-    let id = UUID()
+    /// Stable identifier based on name + coordinate,
+    /// so that ``selectedPlace`` is preserved across list refreshes.
+    let id: String
     let name: String
     let coordinate: CLLocationCoordinate2D
     let distance: CLLocationDistance
     let placemark: CLPlacemark
     let mapItem: MKMapItem
+
+    init(
+        name: String,
+        coordinate: CLLocationCoordinate2D,
+        distance: CLLocationDistance,
+        placemark: CLPlacemark,
+        mapItem: MKMapItem
+    ) {
+        // Build a stable ID so the same POI is recognised after a list refresh
+        let latStr = String(format: "%.5f", coordinate.latitude)
+        let lngStr = String(format: "%.5f", coordinate.longitude)
+        self.id = "\(name)-\(latStr)-\(lngStr)"
+        self.name = name
+        self.coordinate = coordinate
+        self.distance = distance
+        self.placemark = placemark
+        self.mapItem = mapItem
+    }
 
     var distanceFormatted: String {
         if distance < 1000 {
@@ -31,8 +51,8 @@ struct NearbyPlace: Identifiable {
 /// │  [🔍 搜索地点]                    │
 /// │                   📍             │
 /// │          MAP (full screen)       │
-/// │                                  │
-/// ├──────────────────────────────────┤  ← sheet (draggable)
+/// │          freely draggable        │
+/// ├──────────────────────────────────┤  ← bottom panel (draggable)
 /// │  ───                             │
 /// │  附近地点                         │
 /// │  · 逸景雅居                100m  │
@@ -48,11 +68,13 @@ struct NearbyPlace: Identifiable {
 ///
 /// # Single source of truth
 /// ``mapCenter`` is the **only** coordinate source for nearby search,
-/// reverse geocode, and POI search.  It is updated on every
-/// ``onMapCameraChange(frequency: .continuous)`` callback.  All other
-/// coordinate values (first‑fetch location, current‑location button,
-/// selected‑place coordinate) are used exclusively for map positioning
-/// and record saving — never as input to ``MKLocalSearch``.
+/// reverse geocode, and POI search.
+///
+/// # Interaction rules
+/// - **Map drag / zoom / rotate**: fully interactive — no view covers the map.
+/// - **Bottom panel**: custom overlay (not `.sheet`) so the map stays live.
+/// - **Tap POI**: sets ``selectedPlace`` immediately, does NOT re-search.
+/// - **Nearby search**: only fires on map‑center change (debounced 300ms).
 struct LocationPickerView: View {
     @Binding var selectedName: String?
     @Binding var selectedLatitude: Double?
@@ -71,9 +93,22 @@ struct LocationPickerView: View {
     @State private var searchTask: Task<Void, Never>?
     @State private var nearbySearchTask: Task<Void, Never>?
     @State private var isSearching = false
-    @State private var isSheetPresented = true
+
+    /// `true` while a programmatic camera animation is in progress
+    /// (triggered by tapping a POI).  During this window the
+    /// ``onMapCameraChange(frequency:.continuous)`` handler skips the nearby
+    /// search — the map is moving because the user *selected* something,
+    /// not because they dragged.
+    @State private var isAnimatingToPlace = false
+
+    /// Bottom‑panel drag state
+    @State private var sheetDragOffset: CGFloat = 0
+    @State private var isSheetExpanded = false
 
     private let locationService = LocationService.shared
+
+    private let minSheetHeight: CGFloat = 280
+    private var maxSheetHeight: CGFloat { UIScreen.main.bounds.height * 0.7 }
 
     /// Whether the user has typed something in the search bar.
     private var isSearchActive: Bool {
@@ -83,6 +118,16 @@ struct LocationPickerView: View {
     /// The list currently shown: search results when active, nearby places otherwise.
     private var currentPlaces: [NearbyPlace] {
         isSearchActive ? searchResults : nearbyPlaces
+    }
+
+    /// Current height of the bottom panel (before drag offset is applied).
+    private var baseSheetHeight: CGFloat {
+        isSheetExpanded ? maxSheetHeight : minSheetHeight
+    }
+
+    /// Final panel height after applying live drag offset.
+    private var sheetHeight: CGFloat {
+        max(minSheetHeight, baseSheetHeight - sheetDragOffset)
     }
 
     // MARK: - Init
@@ -119,57 +164,27 @@ struct LocationPickerView: View {
 
     var body: some View {
         NavigationStack {
-            Map(position: $cameraPosition) {
-                // Marker at selected place
-                if let place = selectedPlace {
-                    Marker(place.name, coordinate: place.coordinate)
-                }
-            }
-            .mapStyle(.standard)
-            .mapControls {
-                MapCompass()
-                MapScaleView()
-            }
-            .onMapCameraChange(frequency: .continuous) { context in
-                // ── Single source of truth ──────────────────────────
-                mapCenter = context.region.center
+            ZStack(alignment: .bottom) {
+                // ════════════════════════════════════════════════════════
+                // Layer 1 — Map (full screen, fully interactive)
+                // The search bar is an overlay ON the map so it only
+                // occupies its natural height — no full‑screen blocker.
+                // ════════════════════════════════════════════════════════
+                mapLayer
 
-                // ── Debounced nearby search ────────────────────────
-                nearbySearchTask?.cancel()
-                nearbySearchTask = Task { [center = context.region.center] in
-                    try? await Task.sleep(for: .milliseconds(300))
-                    guard !Task.isCancelled else { return }
-                    await fetchNearbyPlaces(center: center)
-                }
-            }
-            .onMapCameraChange(frequency: .onEnd) { _ in
-                // User finished dragging — clear previous selection
-                selectedPlace = nil
-            }
-            .overlay(alignment: .center) {
-                // Fixed center pin — always stays at map center
-                Image(systemName: "mappin")
-                    .font(.title2)
-                    .foregroundStyle(.blue)
-                    .offset(y: -16)
-            }
-            .overlay(alignment: .top) {
-                searchBar
-                    .padding(.horizontal, AppTheme.spacing.xlarge)
-                    .padding(.vertical, AppTheme.spacing.medium)
+                // ════════════════════════════════════════════════════════
+                // Layer 2 — Bottom panel (overlay, draggable handle)
+                // ════════════════════════════════════════════════════════
+                bottomPanel
             }
             .navigationTitle("选择位置")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
+                        .zIndex(100) // ensure tappable above everything
                 }
-            }
-            .sheet(isPresented: $isSheetPresented) {
-                bottomSheetContent
-                    .presentationDetents([.fraction(0.28), .medium, .large])
-                    .presentationDragIndicator(.visible)
-                    .interactiveDismissDisabled()
             }
         }
         .onChange(of: searchQuery) { _, newValue in
@@ -187,6 +202,57 @@ struct LocationPickerView: View {
         .onAppear {
             // Initial nearby fetch (uses mapCenter set in init)
             Task { await fetchNearbyPlaces(center: mapCenter) }
+        }
+    }
+
+    // MARK: - Map Layer
+
+    private var mapLayer: some View {
+        Map(position: $cameraPosition) {
+            if let place = selectedPlace {
+                Marker(place.name, coordinate: place.coordinate)
+            }
+        }
+        .mapStyle(.standard)
+        .mapControls {
+            MapCompass()
+            MapScaleView()
+        }
+        .onMapCameraChange(frequency: .continuous) { context in
+            mapCenter = context.region.center
+
+            // ── Do NOT search during programmatic animation (Bug 4) ──
+            if isAnimatingToPlace { return }
+
+            // ── Debounced nearby search on user drag ──────────────
+            nearbySearchTask?.cancel()
+            nearbySearchTask = Task { [center = context.region.center] in
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled else { return }
+                let shouldSearch = await MainActor.run { !isAnimatingToPlace }
+                guard shouldSearch else { return }
+                await fetchNearbyPlaces(center: center)
+            }
+        }
+        .onMapCameraChange(frequency: .onEnd) { _ in
+            // User finished dragging — clear previous selection
+            // (onEnd does NOT fire after programmatic animation)
+            if !isAnimatingToPlace {
+                selectedPlace = nil
+            }
+        }
+        .overlay(alignment: .center) {
+            // Fixed center pin — visual only, never blocks map gestures
+            Image(systemName: "mappin")
+                .font(.title2)
+                .foregroundStyle(.blue)
+                .offset(y: -16)
+                .allowsHitTesting(false)
+        }
+        .overlay(alignment: .top) {
+            searchBar
+                .padding(.horizontal, AppTheme.spacing.xlarge)
+                .padding(.top, AppTheme.spacing.medium)
         }
     }
 
@@ -219,14 +285,24 @@ struct LocationPickerView: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
-    // MARK: - Bottom Sheet Content
+    // MARK: - Bottom Panel
 
-    /// Content shown inside the draggable sheet.
-    /// The sheet has ``presentationDetents`` so the user can drag between
-    /// `.fraction(0.28)`, `.medium`, and `.large`.
-    private var bottomSheetContent: some View {
+    /// Custom bottom panel (not a `.sheet`!) so the map remains fully
+    /// interactive behind it.  The user can:
+    /// - Drag the **handle**  ↕  to expand / collapse the panel.
+    /// - **Scroll** the places list independently.
+    /// - **Drag / zoom / rotate** the map in the uncovered area.
+    private var bottomPanel: some View {
         VStack(spacing: 0) {
-            // ── Header ────────────────────────────────────────────────
+            // ── Drag handle ───────────────────────────────────────
+            Capsule()
+                .fill(.tertiary)
+                .frame(width: 36, height: 5)
+                .padding(.vertical, 8)
+                .gesture(sheetDragGesture)
+                .zIndex(10)
+
+            // ── Header ────────────────────────────────────────────
             HStack {
                 Text(isSearchActive ? "搜索结果" : "附近地点")
                     .font(.subheadline)
@@ -238,10 +314,9 @@ struct LocationPickerView: View {
                 }
             }
             .padding(.horizontal, AppTheme.spacing.xlarge)
-            .padding(.top, AppTheme.spacing.medium)
             .padding(.bottom, AppTheme.spacing.small)
 
-            // ── Places list ───────────────────────────────────────────
+            // ── Places list ───────────────────────────────────────
             if currentPlaces.isEmpty && !isSearching {
                 Spacer()
                 Text(isSearchActive ? "未找到地点" : "拖动地图查找附近地点")
@@ -268,7 +343,7 @@ struct LocationPickerView: View {
                 }
             }
 
-            // ── Current location + Confirm ────────────────────────────
+            // ── Current location + Confirm ────────────────────────
             VStack(spacing: 0) {
                 Divider()
                     .padding(.horizontal, AppTheme.spacing.xlarge)
@@ -307,24 +382,66 @@ struct LocationPickerView: View {
                 .padding(.bottom, AppTheme.spacing.medium)
             }
         }
+        .frame(height: sheetHeight)
+        .frame(maxWidth: .infinity)
         .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .zIndex(50)
+    }
+
+    /// Drag gesture placed on the capsule handle so it does not conflict
+    /// with the ``ScrollView`` or the ``Map`` gestures underneath.
+    private var sheetDragGesture: some Gesture {
+        DragGesture()
+            .onChanged { value in
+                sheetDragOffset = value.translation.height
+            }
+            .onEnded { value in
+                let offset = sheetDragOffset
+                let velocity = value.predictedEndTranslation.height
+                sheetDragOffset = 0
+
+                withAnimation(.interactiveSpring()) {
+                    if isSheetExpanded {
+                        // Collapse when dragged down past threshold
+                        if offset > 80 || velocity > 200 {
+                            isSheetExpanded = false
+                        }
+                        // otherwise stay expanded
+                    } else {
+                        // Expand when dragged up past threshold
+                        if offset < -80 || velocity < -200 {
+                            isSheetExpanded = true
+                        }
+                        // otherwise stay compact
+                    }
+                }
+            }
     }
 
     // MARK: - Actions
 
+    /// Called when the user taps a place in the list.
+    ///
+    /// Sets ``selectedPlace`` immediately (one‑tap selection, Bug 3).
+    /// Sets ``isAnimatingToPlace`` so the ``.continuous`` camera handler
+    /// skips the nearby search — the map is moving because the user
+    /// *selected* something, not because they dragged (Bug 4).
     private func selectPlace(_ place: NearbyPlace) {
         selectedPlace = place
+        isAnimatingToPlace = true
 
-        // Animate map to center on the selected place
-        // This triggers onMapCameraChange(.continuous) which updates
-        // mapCenter and starts a debounced nearby search.  Since
-        // onMapCameraChange(.onEnd) only fires after gesture end
-        // (not programmatic animation), selectedPlace is preserved.
         withAnimation(.easeInOut(duration: 0.35)) {
             cameraPosition = .region(MKCoordinateRegion(
                 center: place.coordinate,
                 span: MKCoordinateSpan(latitudeDelta: 0.005, longitudeDelta: 0.005)
             ))
+        }
+
+        // Reset flag after animation completes (debounce window included)
+        Task {
+            try? await Task.sleep(for: .milliseconds(800))
+            await MainActor.run { isAnimatingToPlace = false }
         }
     }
 
@@ -344,14 +461,11 @@ struct LocationPickerView: View {
             let result = await locationService.requestLocation()
             await MainActor.run {
                 if let lat = result.latitude, let lng = result.longitude {
-                    // Clear any previous selection — map is moving to a new center
                     selectedPlace = nil
                     cameraPosition = .region(MKCoordinateRegion(
                         center: CLLocationCoordinate2D(latitude: lat, longitude: lng),
                         span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
                     ))
-                    // onMapCameraChange(.continuous) + 300ms debounce
-                    // will trigger nearby search with the new mapCenter
                 }
                 isFetchingCurrentLocation = false
             }
@@ -366,7 +480,7 @@ struct LocationPickerView: View {
     /// 2. MKLocalSearch with the locality as query, ~300m radius.
     /// 3. Sort results by distance from center.
     ///
-    /// - Parameter center: **Must** be ``mapCenter`` — this is the single
+    /// - Parameter center: **Must** be ``mapCenter`` — the single
     ///   source of truth for all coordinate-based queries.
     private func fetchNearbyPlaces(center: CLLocationCoordinate2D) async {
         isSearching = true
