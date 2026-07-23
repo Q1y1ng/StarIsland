@@ -69,11 +69,7 @@ private func isAdministrativeRegion(item: MKMapItem) -> Bool {
     }
 
     // ── Signal 2: name looks like an administrative label ──────────
-    // Short names (≤4 characters) ending with common admin suffixes
-    // are almost certainly divisions, not POIs.
     let adminSuffixes = ["市", "区", "县", "省", "镇", "乡"]
-    // Also catch patterns like "长安区" (5 chars) or "经济技术开发区" (longer but admin)
-    // We use a length cap of 8 to avoid filtering legitimate named places.
     if name.count <= 8,
        adminSuffixes.contains(where: { name.hasSuffix($0) }) {
         return true
@@ -85,7 +81,9 @@ private func isAdministrativeRegion(item: MKMapItem) -> Bool {
 // MARK: - Search Radius
 
 /// Computes a POI search radius (in meters) from the visible map region.
-/// Clamped between 200 m (street‑level zoom) and 2 000 m (city view).
+/// Clamped between 1 000 m (default minimum) and 2 000 m (city view).
+/// A larger minimum radius ensures MKLocalSearch returns sufficient results
+/// even in areas with moderate POI density.
 private func searchRadius(from region: MKCoordinateRegion) -> CLLocationDistance {
     let midLat = region.center.latitude * .pi / 180
     let metersPerDegreeLat: CLLocationDistance = 111_320
@@ -93,7 +91,7 @@ private func searchRadius(from region: MKCoordinateRegion) -> CLLocationDistance
     let widthMeters = region.span.longitudeDelta * metersPerDegreeLng
     let heightMeters = region.span.latitudeDelta * metersPerDegreeLat
     let avgDimension = (abs(widthMeters) + abs(heightMeters)) / 2
-    return min(max(avgDimension / 2, 200), 2_000)
+    return min(max(avgDimension / 2, 1_000), 2_000)
 }
 
 // MARK: - POI Category Filter
@@ -144,10 +142,11 @@ private enum SheetDetent: CGFloat, CaseIterable {
 /// # Search strategy
 ///
 /// - **Nearby POI search** (map drag → camera idle → 300 ms debounce):
-///   Uses ``MKLocalSearch`` with ``resultTypes: [.pointOfInterest]``,
-///   ``pointOfInterestFilter`` set to ``nearbyPOIFilter``, and NO
-///   ``naturalLanguageQuery`` — so the search returns real POIs near the
-///   map centre, NOT administrative divisions.
+///   Uses ``MKLocalSearch`` with ``MKLocalPointsOfInterestRequest``
+///   (iOS 16+ official POI‑only search API — no ``naturalLanguageQuery``
+///   needed, no risk of address / admin‑region matches).  All POI categories
+///   are included via ``.includingAll``; administrative divisions that
+///   somehow slip through are caught by ``isAdministrativeRegion(item:)``.
 ///
 /// - **Text search** (user types in search bar → 300 ms debounce):
 ///   Uses ``MKLocalSearch`` with the query as ``naturalLanguageQuery``,
@@ -281,7 +280,12 @@ struct LocationPickerView: View {
             }
         }
         .onAppear {
-            Task { await searchNearbyPOIs(center: mapCenter) }
+            print("[LocationPicker] onAppear — starting initial POI search at center")
+            nearbySearchTask?.cancel()
+            nearbySearchTask = Task {
+                print("[LocationPicker] onAppear Task — searching near (\(mapCenter.latitude), \(mapCenter.longitude))")
+                await searchNearbyPOIs(center: mapCenter)
+            }
         }
     }
 
@@ -300,30 +304,35 @@ struct LocationPickerView: View {
         }
         .onMapCameraChange(frequency: .continuous) { context in
             // ── Update single source of truth ─────────────────
-            mapCenter = context.region.center
+            let newCenter = context.region.center
+            mapCenter = newCenter
+            print("[LocationPicker] camera continuous — center=(\(newCenter.latitude), \(newCenter.longitude)) isAnimating=\(isAnimatingToPlace)")
 
             // ── Skip search during programmatic animation ─────
             if isAnimatingToPlace { return }
 
             // ── Debounced POI search on user drag ─────────────
             nearbySearchTask?.cancel()
-            nearbySearchTask = Task { [center = context.region.center] in
+            nearbySearchTask = Task { [center = newCenter] in
                 try? await Task.sleep(for: .milliseconds(300))
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled else {
+                    print("[LocationPicker] camera debounce — cancelled")
+                    return
+                }
                 let shouldSearch = await MainActor.run { !isAnimatingToPlace }
-                guard shouldSearch else { return }
+                guard shouldSearch else {
+                    print("[LocationPicker] camera debounce — suppressed (isAnimating)")
+                    return
+                }
+                print("[LocationPicker] camera debounce — starting POI search")
                 await searchNearbyPOIs(center: center)
             }
         }
         .onMapCameraChange(frequency: .onEnd) { _ in
-            // User finished dragging — clear previous selection.
-            // onEnd does NOT fire after programmatic animation
-            // (cameraPosition assignments without withAnimation do not
-            //  trigger onEnd; withAnimation does, but isAnimatingToPlace
-            //  guards it).
             if !isAnimatingToPlace {
                 selectedPlace = nil
             }
+            print("[LocationPicker] camera onEnd — selectedPlace cleared=\(!isAnimatingToPlace)")
         }
         .overlay(alignment: .center) {
             // Fixed centre pin — visual only, never blocks map gestures
@@ -526,7 +535,8 @@ struct LocationPickerView: View {
     /// skips the nearby search — the map is moving because the user
     /// *selected* something, not because they dragged.
     ///
-    /// Never triggers MKLocalSearch, reverse geocode, or nearby refresh.
+    /// After the animation completes, triggers a nearby POI search for the
+    /// selected location so the bottom sheet is always up to date.
     private func selectPlace(_ place: NearbyPlace) {
         selectedPlace = place
         isAnimatingToPlace = true
@@ -538,9 +548,18 @@ struct LocationPickerView: View {
             ))
         }
 
+        // Wait for animation + settle, then refresh nearby places
+        // and release the animation lock.
         Task {
             try? await Task.sleep(for: .milliseconds(800))
-            await MainActor.run { isAnimatingToPlace = false }
+            await MainActor.run {
+                isAnimatingToPlace = false
+            }
+            // 🔁 Refresh nearby places for the selected location
+            // (camera .continuous won't fire after the animation stops,
+            //  so we must trigger the search explicitly.)
+            print("[LocationPicker] selectPlace — animation done, refreshing nearby for selected location")
+            await searchNearbyPOIs(center: place.coordinate)
         }
     }
 
@@ -570,11 +589,13 @@ struct LocationPickerView: View {
             let result = await locationService.requestLocation()
             await MainActor.run {
                 guard let lat = result.latitude, let lng = result.longitude else {
+                    print("[LocationPicker] fetchCurrentLocation — failed (no location)")
                     isFetchingCurrentLocation = false
                     return
                 }
 
                 let coord = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+                print("[LocationPicker] fetchCurrentLocation — got (\(lat), \(lng))")
 
                 // ── Single source of truth ────────────────────────
                 mapCenter = coord
@@ -588,6 +609,7 @@ struct LocationPickerView: View {
                 // ── Immediate POI search (not debounced) ──────────
                 nearbySearchTask?.cancel()
                 nearbySearchTask = Task {
+                    print("[LocationPicker] fetchCurrentLocation — starting POI search")
                     await searchNearbyPOIs(center: coord)
                     await MainActor.run { isAnimatingToPlace = false }
                 }
@@ -598,47 +620,91 @@ struct LocationPickerView: View {
         }
     }
 
-    // MARK: - Nearby POI Search (MapKit POI Search)
+    // MARK: - Nearby POI Search (iOS 26 MapKit POI Search)
 
     /// **Only** entry point for nearby‑place search.
     ///
-    /// Uses Apple MapKit POI Search (``resultTypes: [.pointOfInterest]``)
-    /// with an explicit ``pointOfInterestFilter`` that includes residential,
-    /// commercial, food, education, healthcare, transport, and entertainment
-    /// categories — and **excludes** government / administrative POIs.
+    /// Uses Apple's official POI‑only search API
+    /// ``MKLocalPointsOfInterestRequest`` (iOS 16+) — this takes a centre
+    /// coordinate and radius, does NOT need a ``naturalLanguageQuery``,
+    /// and returns only point‑of‑interest results (no address / admin‑region
+    /// matches).
     ///
-    /// Results are post‑filtered to remove any administrative divisions
-    /// that slip through (市／区／县／省) and sorted by distance from centre.
+    /// All POI categories are included via ``.includingAll`` filter.
+    /// Administrative divisions that somehow slip through are caught by
+    /// ``isAdministrativeRegion(item:)``.
     ///
     /// - Parameter center: **Must** be ``mapCenter`` — guaranteed by caller.
     private func searchNearbyPOIs(center: CLLocationCoordinate2D) async {
-        isSearching = true
-        defer { isSearching = false }
-
-        // ── 1. Build POI search request ─────────────────────────
-        let request = MKLocalSearch.Request()
-        request.region = MKCoordinateRegion(
+        let radius = searchRadius(from: MKCoordinateRegion(
             center: center,
-            latitudinalMeters: 500,
-            longitudinalMeters: 500
+            span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
+        ))
+        print("""
+        ┌─ [LocationPicker] Nearby POI Search ─────────────────────
+        │ Camera Center:  \(center.latitude), \(center.longitude)
+        │ Search Radius:  \(Int(radius))m
+        │ API:            MKLocalPointsOfInterestRequest
+        │ Filter:         .includingAll
+        └──────────────────────────────────────────────────────────
+        """)
+
+        isSearching = true
+        defer {
+            isSearching = false
+            print("[LocationPicker] Nearby POI Search — isSearching=false")
+        }
+
+        // ── 1. Build the POI‑only request ─────────────────────────
+        // MKLocalPointsOfInterestRequest is the iOS 16+ official API
+        // for "find POIs near this location".  It requires NO query
+        // string and returns ONLY .pointOfInterest results — address
+        // / admin‑region matches are impossible.
+        let poiRequest = MKLocalPointsOfInterestRequest(
+            center: center,
+            radius: radius
         )
-        // POI search — only points of interest, NO addresses (which
-        // include administrative divisions like "西安市").
-        request.resultTypes = [.pointOfInterest]
-        // Explicit category filter — excludes government / admin POIs.
-        request.pointOfInterestFilter = nearbyPOIFilter
+        poiRequest.pointOfInterestFilter = nearbyPOIFilter
 
-        // ── 2. Execute ──────────────────────────────────────────
-        let search = MKLocalSearch(request: request)
-        guard let response = try? await search.start(), !Task.isCancelled else { return }
+        let search = MKLocalSearch(request: poiRequest)
 
-        // ── 3. Build sorted result, filtering out admin regions ─
+        // ── 2. Execute ───────────────────────────────────────────
+        let response: MKLocalSearch.Response
+        do {
+            response = try await search.start()
+            print("[LocationPicker] ✅ MKLocalSearch.start() succeeded")
+        } catch {
+            print("[LocationPicker] ❌ Nearby Search Error: \(error.localizedDescription)")
+            return
+        }
+
+        guard !Task.isCancelled else {
+            print("[LocationPicker] Nearby POI Search — cancelled after response")
+            return
+        }
+
+        // ── 3. Debug: log every raw result ───────────────────────
+        print("[LocationPicker] Apple Returned: \(response.mapItems.count) items")
+        for (i, item) in response.mapItems.enumerated() {
+            let cat = item.pointOfInterestCategory?.rawValue ?? -1
+            print("  [\(i)] name=\(item.name ?? "nil") category=\(cat) title=\(item.placemark.title ?? "nil")")
+        }
+
+        // ── 4. Filter out administrative regions ─────────────────
         let centerLocation = CLLocation(latitude: center.latitude, longitude: center.longitude)
+
+        let beforeFilter = response.mapItems.count
+
         let places: [NearbyPlace] = response.mapItems
             .compactMap { item in
-                guard let name = item.name else { return nil }
-                // 🔥 Core fix: exclude administrative divisions
-                guard !isAdministrativeRegion(item: item) else { return nil }
+                guard let name = item.name else {
+                    print("[LocationPicker]   filter: dropped (nil name)")
+                    return nil
+                }
+                if isAdministrativeRegion(item: item) {
+                    print("[LocationPicker]   filter: dropped admin region — \(name)")
+                    return nil
+                }
                 let coord = item.placemark.coordinate
                 let itemLocation = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
                 let distance = centerLocation.distance(from: itemLocation)
@@ -652,9 +718,16 @@ struct LocationPickerView: View {
             }
             .sorted { $0.distance < $1.distance }
 
+        print("[LocationPicker] Filter Before: \(beforeFilter)  After: \(places.count)")
+
+        // ── 5. Update UI on MainActor ────────────────────────────
         await MainActor.run {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                print("[LocationPicker] Nearby POI Search — cancelled before UI update")
+                return
+            }
             nearbyPlaces = places
+            print("[LocationPicker] ✅ Nearby Updated: \(places.count) places in nearbyPlaces")
         }
     }
 
@@ -672,6 +745,7 @@ struct LocationPickerView: View {
             return
         }
 
+        print("[LocationPicker] Text Search — query=\"\(trimmed)\" near (\(mapCenter.latitude), \(mapCenter.longitude))")
         isSearching = true
         defer { isSearching = false }
 
@@ -686,7 +760,16 @@ struct LocationPickerView: View {
         )
 
         let search = MKLocalSearch(request: request)
-        guard let response = try? await search.start(), !Task.isCancelled else { return }
+        let response: MKLocalSearch.Response
+        do {
+            response = try await search.start()
+        } catch {
+            print("[LocationPicker] ❌ Text Search Error: \(error.localizedDescription)")
+            return
+        }
+        guard !Task.isCancelled else { return }
+
+        print("[LocationPicker] Text Search — Apple returned \(response.mapItems.count) items")
 
         let centerLocation = CLLocation(latitude: mapCenter.latitude, longitude: mapCenter.longitude)
         let places = response.mapItems
@@ -707,6 +790,7 @@ struct LocationPickerView: View {
         await MainActor.run {
             guard !Task.isCancelled else { return }
             searchResults = places
+            print("[LocationPicker] Text Search — Updated \(places.count) search results")
         }
     }
 }
